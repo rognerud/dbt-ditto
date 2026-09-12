@@ -167,8 +167,5 @@ func splitNameAndType(field string) (string, string, bool) {
 	if i < 0 {
 		return "", "", false
 	}
-	name := f[:i]
-	// A leading keyword like `field` is not expected, but a bare type such as
-	// `INT64` alone would have been caught above.
-	return name, strings.TrimSpace(f[i+1:]), name != ""
+	return f[:i], strings.TrimSpace(f[i+1:]), true
 }

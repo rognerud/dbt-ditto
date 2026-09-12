@@ -41,11 +41,8 @@ func copyExtra(extra map[string]any, keys []string) map[string]any {
 }
 
 // labelKey is the meta key provider-reported labels live under, or empty when
-// labels are flattened, ignored, or routed only to tags.
-//
-// Empty disables every rule below, which is the documented cost of flattening:
-// a label written straight into meta is indistinguishable from meta somebody
-// typed, and inherits like it.
+// labels are flattened, ignored, or routed only to tags. Empty disables every
+// rule below: a flattened label is indistinguishable from hand-typed meta.
 func (r *Resolver) labelKey() string {
 	if !r.Cfg.SourceLabels.Nested() {
 		return ""
@@ -54,13 +51,10 @@ func (r *Resolver) labelKey() string {
 }
 
 // carryLabels decides whether the label map found on an ancestor travels to
-// this column, and records why not when it does not.
-//
-// The rule is about what the match preserved. An exact name is the same column,
-// and a struct pack or unpack is the same data in a different shape, so a
-// classification true of one is true of the other. An aggregate is not: the
-// description still applies — `avg_salary` still means salary, averaged — but
-// the value the label classified no longer exists.
+// this column, and records why not when it does not. The rule is about what the
+// match preserved: an exact name or a struct pack/unpack is the same data, an
+// aggregate is not — `avg_salary` still means salary, but the value the label
+// classified no longer exists.
 func (r *Resolver) carryLabels(k *knowledge, from *dbt.Node, rest []*dbt.Node,
 	name string, keys [matchNone][]string, rank matchRank, value any) bool {
 

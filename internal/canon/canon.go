@@ -1,17 +1,12 @@
 // Package canon rewrites dbt schema YAML with its top-level entries sorted by
-// name, so that two trees can be compared without the comparison depending on
-// the order dbt happened to list its nodes in.
+// name, so two trees compare without the comparison depending on the order dbt
+// happened to list its nodes in.
 //
-// dbt does not order the nodes in a manifest deterministically, and that order
-// is visible in the bytes whenever several nodes share one schema file:
-// dbt-ditto writes entries in manifest order because dbt-osmosis does. The two
-// tools learn the order by different routes, though — dbt-osmosis parses the
-// project on every run, dbt-ditto reads the committed target/manifest.json — so
-// a byte comparison of the two outputs would otherwise assert an order neither
-// tool promises, and flip with the machine that ran it.
-//
-// Entry order within a file is a separate claim, proved by the tests that run
-// against the recorded manifest.
+// That order is not deterministic, and it shows in the bytes when several nodes
+// share a schema file. dbt-osmosis learns it by parsing the project, dbt-ditto
+// by reading the committed manifest.json, so comparing the two outputs raw
+// would assert an order neither tool promises. Entry order within a file is a
+// separate claim, proved against the recorded manifest.
 package canon
 
 import (

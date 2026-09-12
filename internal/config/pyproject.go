@@ -10,14 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A dbt project that installs this tool from PyPI already has a pyproject.toml,
-// and PEP 518 reserves `[tool.<name>]` in it for exactly this. Keeping the
-// configuration next to the dependency that provides it saves a file whose only
-// job is to exist.
-//
 // The table holds the same keys as dbt_ditto.yml, spelled the way TOML spells
-// them: a list of projects is `[[tool.dbt-ditto.projects]]`, a nested section is
-// `[tool.dbt-ditto.inheritance]`.
+// them: a list of projects is `[[tool.dbt-ditto.projects]]`, a nested section
+// is `[tool.dbt-ditto.inheritance]`.
 const (
 	PyprojectFilename = "pyproject.toml"
 	// PyprojectTable is the table read, named after the distribution.
@@ -31,10 +26,9 @@ func isPyproject(path string) bool {
 	return strings.EqualFold(filepath.Base(path), PyprojectFilename)
 }
 
-// hasPyprojectTable reports whether a pyproject.toml configures this tool. A
-// file that cannot be parsed is treated as not configuring it: someone else's
-// broken packaging file is not this tool's error to raise, and the search should
-// carry on to a config that does exist.
+// hasPyprojectTable reports whether a pyproject.toml configures this tool. An
+// unparseable file counts as not configuring it, so the search carries on
+// rather than raising someone else's broken packaging as this tool's error.
 func hasPyprojectTable(path string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -44,12 +38,9 @@ func hasPyprojectTable(path string) bool {
 	return err == nil && ok
 }
 
-// unmarshalPyproject fills c from the `[tool.dbt-ditto]` table.
-//
-// The table is decoded to a generic map and handed back to the YAML decoder
-// rather than given a second set of struct tags. One set of tags cannot drift
-// from the other, and every default, alias and nested section keeps exactly one
-// definition.
+// unmarshalPyproject fills c from the `[tool.dbt-ditto]` table, by decoding to
+// a generic map and handing that to the YAML decoder — so the config structs
+// need no second set of `toml:` tags to keep in step.
 func unmarshalPyproject(raw []byte, c *Config) error {
 	section, ok, err := pyprojectSection(raw)
 	if err != nil {
@@ -75,9 +66,6 @@ func pyprojectSection(raw []byte) (map[string]any, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	// `dbt-ditto` is the distribution name and the spelling to document;
-	// `dbt_ditto` is accepted because the two are the same name to anyone
-	// writing it.
 	for _, key := range []string{"dbt-ditto", pyprojectTableAlias} {
 		if section, ok := tool[key].(map[string]any); ok {
 			return section, true, nil

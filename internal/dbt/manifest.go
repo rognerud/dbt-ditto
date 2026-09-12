@@ -112,18 +112,10 @@ func (c *Column) EffectiveTags() []string {
 	if c == nil {
 		return nil
 	}
-	if c.Config == nil || len(c.Config.Tags) == 0 {
+	if c.Config == nil {
 		return c.Tags
 	}
-	seen := make(map[string]bool, len(c.Tags)+len(c.Config.Tags))
-	out := make([]string, 0, len(c.Tags)+len(c.Config.Tags))
-	for _, t := range append(append([]string(nil), c.Tags...), c.Config.Tags...) {
-		if !seen[t] {
-			seen[t] = true
-			out = append(out, t)
-		}
-	}
-	return out
+	return UnionTags(c.Tags, c.Config.Tags)
 }
 
 // DependsOn holds the upstream unique_ids of a node.

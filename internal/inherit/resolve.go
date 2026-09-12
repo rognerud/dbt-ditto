@@ -344,12 +344,9 @@ func (r *Resolver) backfills(n *dbt.Node) bool {
 }
 
 // backfill finds a description for a column among the node's descendants,
-// nearest generation first, and returns the node it came from.
-//
-// The search deliberately does not stop at the first descendant that has the
-// column: a staging model usually selects a source column through without
-// documenting it, and the description worth having may be another step down. It
-// stops at the first real description instead.
+// nearest generation first, and returns the node it came from. It stops at the
+// first real description, not the first descendant that has the column: a
+// staging model usually selects a source column through undocumented.
 func (r *Resolver) backfill(n *dbt.Node, name string) (string, string, bool) {
 	m := r.matcher()
 	keys := m.keysFor(name)
@@ -368,13 +365,10 @@ func (r *Resolver) backfill(n *dbt.Node, name string) (string, string, bool) {
 }
 
 // useComment reports whether a warehouse comment may be used as a column's
-// description.
-//
-// dbt-osmosis only reads the comment when it invents the column entry, so a
-// column that is already written about keeps whatever the YAML says even if
-// that is nothing. Matching that is the default; `columns.comments: always`
-// also lets a comment fill a column that exists but has no description, which
-// is what a project that documents its sources in the warehouse wants.
+// description. dbt-osmosis reads it only when it invents the column entry, so
+// an already-written column keeps whatever the YAML says, even nothing; that is
+// the default. `columns.comments: always` also fills an existing but
+// undocumented column.
 func (r *Resolver) useComment(n *dbt.Node, name string, ex *ExistingColumn) bool {
 	switch r.Cfg.WarehouseComments {
 	case config.WarehouseCommentsNever:
@@ -414,12 +408,11 @@ func (r *Resolver) seedKnowledge(n *dbt.Node, name string, ex *ExistingColumn) k
 // inheritInto folds every ancestor generation into k, furthest first, and
 // returns the unique_id the surviving description came from.
 //
-// The second return value names the ancestors that documented the column
-// differently in the same generation as the winner. Within a generation the
-// first ancestor by unique_id claims the column, so a disagreement there is
-// settled alphabetically — which is arbitrary, and worth saying out loud. A
-// nearer generation overriding a further one is not a disagreement: that is the
-// whole point of inheritance, so it is not reported.
+// The second return value names ancestors in the winner's own generation that
+// documented the column differently. Within a generation the first ancestor by
+// unique_id claims it, so that disagreement is settled alphabetically — which
+// is arbitrary, and worth saying out loud. A nearer generation overriding a
+// further one is inheritance working, and is not reported.
 func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name string) (string, []string) {
 	progenitor := ""
 	var competing []string
@@ -434,7 +427,7 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			// First ancestor in this generation with the column claims it; the
 			// rest of the generation is skipped, as dbt-osmosis does.
 			if r.Cfg.InheritTags {
-				k.tags = unionTags(k.tags, c.EffectiveTags())
+				k.tags = dbt.UnionTags(k.tags, c.EffectiveTags())
 			}
 			for _, ek := range r.Cfg.ExtraKeys {
 				v, ok := c.Extra[ek]
@@ -449,21 +442,18 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			if r.Cfg.InheritMeta {
 				labelKey := r.labelKey()
 				for _, mk := range c.EffectiveMeta().Keys() {
-					// An ancestor's own annotations describe that ancestor's
-					// column, not this one: the progenitor is recomputed below,
-					// an upstream disagreement was settled upstream, and the
-					// definitive marker names the one column that *is* the
-					// decision — inheriting it would make every column
-					// downstream claim to be the decision too.
+					// An ancestor's own annotations describe that ancestor's column,
+					// not this one: the progenitor is recomputed below, an upstream
+					// disagreement was settled upstream, and the definitive marker
+					// names the one column that *is* the decision.
 					if r.Cfg.SkipMetaKeys[mk] || mk == r.Cfg.ProgenitorKey ||
 						mk == r.Cfg.AmbiguityKey || mk == DefinitiveKey {
 						continue
 					}
 					v, _ := c.EffectiveMeta().Get(mk)
 					if labelKey != "" && mk == labelKey {
-						// Labels answer a different question from a description
-						// — what may be done with this data, not what it means —
-						// so they travel under their own rules.
+						// Labels travel under their own rules: they say what may be
+						// done with the data, not what it means.
 						if !r.carryLabels(k, a, generations[i][j+1:], name, keys, rank, v) {
 							continue
 						}
@@ -559,13 +549,9 @@ func (r *Resolver) followDirective(target string) (string, string, string) {
 
 func (r *Resolver) resolveNodeLevel(n *dbt.Node, existing Existing, doc *NodeDoc) {
 	// A source's own description, when the YAML has none and the node does.
-	//
-	// For every other node those two agree, because the node's description came
-	// from that YAML in the first place — so this fires only when something put
-	// a description on the node that the file has not got, which is a source
-	// provider reporting what the warehouse says the table is. It is not
-	// inheritance and is not governed by it: nothing upstream of a source
-	// exists, and this is the table describing itself.
+	// For every other node the two agree, since the node's description came from
+	// that YAML — so this fires only for a source provider reporting what the
+	// warehouse says the table is. Not inheritance: the table describes itself.
 	if n.IsSource() && existing.Description == "" && n.Description != "" &&
 		!r.Cfg.IsPlaceholder(n.Description) {
 		doc.Description, doc.SetDescription = n.Description, true
@@ -612,13 +598,11 @@ func (r *Resolver) trueColumns(n *dbt.Node) ([]columnTruth, bool) {
 			cols := cn.Ordered()
 			out := make([]columnTruth, 0, len(cols))
 
-			// Some warehouses report a struct's fields as columns in their own
-			// right and some do not. BigQuery's catalog joins through
-			// COLUMN_FIELD_PATHS, so `profile` and `profile.first_name` both
-			// arrive as columns; DuckDB reports only `profile`, carrying the
-			// field names inside its composite type. Expanding blindly would
-			// duplicate every field on BigQuery, so anything the catalog has
-			// already named is left alone.
+			// BigQuery's catalog joins through COLUMN_FIELD_PATHS, so both
+			// `profile` and `profile.first_name` arrive as columns; DuckDB
+			// reports only `profile`, with the fields inside its composite type.
+			// Expanding blindly would duplicate every BigQuery field, so anything
+			// the catalog already names is left alone.
 			known := make(map[string]bool, len(cols))
 			for _, c := range cols {
 				known[r.fold(c.Name)] = true
@@ -682,21 +666,6 @@ func (r *Resolver) orderColumns(truth []columnTruth, existing []ExistingColumn, 
 	for _, t := range truth {
 		if key := r.fold(t.name); !seen[key] {
 			seen[key] = true
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func unionTags(have, add []string) []string {
-	if len(add) == 0 {
-		return have
-	}
-	seen := make(map[string]bool, len(have)+len(add))
-	out := make([]string, 0, len(have)+len(add))
-	for _, t := range append(append([]string(nil), have...), add...) {
-		if !seen[t] {
-			seen[t] = true
 			out = append(out, t)
 		}
 	}

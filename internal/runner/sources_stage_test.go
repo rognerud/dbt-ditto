@@ -1,7 +1,6 @@
 package runner_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/rognerud/dbt-ditto/internal/config"
@@ -88,6 +87,3 @@ func providerStage(t *testing.T, command string) (string, *config.Config) {
 	cfg.Sources.Providers = []config.SourceProvider{{Command: command}}
 	return dir, cfg
 }
-
-// cachePathIn names the default cache inside a stage directory.
-func cachePathIn(dir string) string { return filepath.Join(dir, "target", "ditto-sources.json") }

@@ -414,18 +414,6 @@ func floatNode(v float64) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: s}
 }
 
-// DecodeMap reads a mapping node back into a Go map.
-func DecodeMap(n *yaml.Node) map[string]any {
-	if n == nil || n.Kind != yaml.MappingNode {
-		return nil
-	}
-	var m map[string]any
-	if err := n.Decode(&m); err != nil {
-		return nil
-	}
-	return m
-}
-
 // DecodeStrings reads a sequence node back into a string slice.
 func DecodeStrings(n *yaml.Node) []string {
 	if n == nil || n.Kind != yaml.SequenceNode {

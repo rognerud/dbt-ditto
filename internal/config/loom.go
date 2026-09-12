@@ -9,14 +9,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A project that already uses dbt-loom has written down, once, where its
-// upstream manifests come from. dbt-ditto reads that same file rather than
-// asking for the list a second time in dbt_ditto.yml.
-//
-// What is read is the manifest list only. dbt-loom's job at dbt runtime —
-// injecting those nodes into the manifest dbt is parsing, so cross-project
-// ref() compiles — is untouched and still loom's. dbt-ditto runs afterwards,
-// over artifacts already on disk, and only writes schema YAML.
+// A project using dbt-loom has already written down where its upstream
+// manifests come from, so that list is read from here rather than asked for a
+// second time in dbt_ditto.yml. Only the list: loom's own job at dbt runtime is
+// untouched, and dbt-ditto runs afterwards over artifacts on disk.
 const loomFilename = "dbt_loom.config.yml"
 
 // loomEnv is dbt-loom's own override for the config location.
@@ -74,10 +70,9 @@ func (c *Config) attachLoomUpstreams() {
 			if m.Name != "" && seen[m.Name] {
 				continue
 			}
-			// Only `type: file` names something this process can open. The
-			// remote types are dbt-loom fetching an artifact over the network,
-			// which dbt-ditto does not do; say so rather than silently
-			// inheriting from fewer projects than the analyst expects.
+			// Only `type: file` names something this process can open; the
+			// remote types are loom fetching over the network. Said out loud
+			// rather than silently inheriting from fewer projects.
 			if !strings.EqualFold(m.Type, "file") {
 				c.Notes = append(c.Notes, fmt.Sprintf(
 					"%s: skipping dbt-loom manifest %q (type %q): only `type: file` is read; download the artifact and add it as `manifest:` in dbt_ditto.yml",

@@ -17,16 +17,13 @@ import (
 //	    meta:
 //	      dbt_ditto_definitive: true
 //
-// Ordinary inheritance answers "what does this column mean" by walking the DAG,
-// which is exactly the wrong tool when several ancestors disagree and the real
-// answer is a decision somebody made. A definitive column is that decision
-// written down: its description is copied to every column of the same name in
-// the graph, up the DAG as well as down it and across project boundaries, and
-// it outranks name matching, directives and `force`.
+// A definitive column is a decision written down, for when several ancestors
+// disagree: its description is copied to every column of that name in the
+// graph — up the DAG as well as down it, and across project boundaries — and it
+// outranks name matching, directives and `force`.
 //
-// The key is deliberately not configurable. It is a contract between projects
-// that may be in different repositories, and a contract each side spells
-// differently is not one.
+// The key is not configurable: it is a contract between repositories, and a
+// contract each side spells differently is not one.
 const DefinitiveKey = "dbt_ditto_definitive"
 
 // Definitive is one column that has been declared settled.
@@ -74,12 +71,9 @@ func sameSpelling(claims []Definitive) bool {
 // BuildDefinitives collects every definitive declaration in the graph, keyed by
 // the folded column name, and fails on a disagreement.
 //
-// Declarations in a project that arrived as a bare manifest — which is how a
-// dbt-loom upstream arrives — are ignored. A definitive is a decision this
-// repository is making about its own documentation; a manifest injected from
-// elsewhere cannot be reviewed, edited or even seen here, so letting it rewrite
-// local descriptions would make the documentation depend on a file nobody in
-// this repository is looking at.
+// Declarations in a manifest-only project (a dbt-loom upstream) are ignored: a
+// definitive is a decision this repository makes about its own documentation,
+// and an injected manifest cannot be reviewed or edited here.
 func BuildDefinitives(g *Graph, fold func(string) string) (map[string]Definitive, error) {
 	claims := map[string][]Definitive{}
 	for _, n := range g.Nodes {

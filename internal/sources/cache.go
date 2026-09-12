@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-// DefaultCachePath is where a refresh writes its answer, relative to the first
-// writable project's root. It sits in `target/` because that is already the
-// directory dbt fills with generated artifacts and which projects already
-// ignore in git.
-const DefaultCachePath = "target/ditto-sources.json"
-
 // cacheFile is the on-disk form. It is the provider response shape plus a
 // header, so a person can read it, and so a provider that writes one directly
 // is a legitimate way to use this without configuring a provider at all.

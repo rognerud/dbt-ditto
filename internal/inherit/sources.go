@@ -7,13 +7,9 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// ShadowedSource is a source table that a loaded project also builds.
-//
-// This is the pre-loom pattern: rather than depending on the upstream project,
-// a team declares its output as a `source:` and points at the relation. The two
-// are indistinguishable in the graph — a source has no `depends_on`, so both a
-// genuine external table and a shadowed one are roots — but they are not
-// indistinguishable by relation, and they want opposite treatment. The shadowed
+// ShadowedSource is a source table that a loaded project also builds: the
+// pre-loom pattern of declaring an upstream project's output as a `source:`.
+// Both are DAG roots, so only the relation tells them apart — but the shadowed
 // one already has documentation one `ref()` away.
 type ShadowedSource struct {
 	Source *dbt.Node
@@ -21,32 +17,21 @@ type ShadowedSource struct {
 	By *dbt.Node
 }
 
-// Mistake reports whether the shadow is worth telling someone about.
-//
-// A source backed by a *seed* is a deliberate pattern, not an error: seeds are
-// how a project stands up fake raw data for development and testing, and the
-// source declaration is what the rest of the project reads it through. Both
-// halves are meant to exist. A source backed by a *model* is the pre-loom
-// workaround, where the right answer is a cross-project ref.
-//
-// Either way the source is not external, so neither is ever sent to a provider.
+// Mistake reports whether the shadow is worth telling someone about. A source
+// backed by a seed is the deliberate fake-raw-data pattern; one backed by a
+// model is the pre-loom workaround, where a cross-project ref is the answer.
+// Neither is external, so neither is ever sent to a provider.
 func (s ShadowedSource) Mistake() bool { return s.By.ResourceType != "seed" }
 
-// ClassifySources splits every source in the graph into the ones no loaded
-// project builds and the ones some project does.
+// ClassifySources splits every source into the ones no loaded project builds
+// and the ones some project does. The external set is what a provider is asked
+// about: exactly the nodes inheritance can never reach.
 //
-// The external set is what a source provider is asked about: it is exactly the
-// set of nodes that inheritance can never reach, because a source is a DAG root
-// and nothing upstream of it exists. Everything else in the graph either has
-// ancestors or is a mistake worth reporting.
-//
-// Note that a dbt-loom upstream is never in either set. Loom-injected upstreams
-// arrive as `model.` nodes, because the downstream project `ref()`s them; only
-// a table declared with `source:` is a source here.
+// A dbt-loom upstream is in neither set: loom-injected upstreams arrive as
+// `model.` nodes, because the downstream project `ref()`s them.
 func (g *Graph) ClassifySources() (external []*dbt.Node, shadowed []ShadowedSource) {
-	// Relations a loaded project builds. Ephemeral models are excluded: they are
-	// inlined as CTEs and never materialize, so a source cannot be pointing at
-	// one and a name collision with a real table is coincidence.
+	// Relations a loaded project builds. Ephemeral models never materialize, so
+	// a source cannot point at one and a name collision is coincidence.
 	built := make(map[string]*dbt.Node, len(g.Nodes))
 	for _, n := range g.Nodes {
 		if n.IsSource() || isEphemeral(n) {
@@ -85,8 +70,7 @@ func isEphemeral(n *dbt.Node) bool {
 }
 
 // relationKey identifies a warehouse relation. Database is part of it: the same
-// schema and table name in another database is another table, and treating them
-// as one would report a shadow that does not exist.
+// schema and table in another database is another table.
 func relationKey(database, schema, relation string) string {
 	return strings.ToLower(database) + "." + strings.ToLower(schema) + "." + strings.ToLower(relation)
 }

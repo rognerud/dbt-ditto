@@ -200,3 +200,20 @@ func normaliseNumbers(v any) any {
 		return v
 	}
 }
+
+// UnionTags appends add to have, dropping duplicates and keeping first-seen
+// order.
+func UnionTags(have, add []string) []string {
+	if len(add) == 0 {
+		return have
+	}
+	seen := make(map[string]bool, len(have)+len(add))
+	out := make([]string, 0, len(have)+len(add))
+	for _, t := range append(append([]string(nil), have...), add...) {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}

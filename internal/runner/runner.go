@@ -191,7 +191,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 			}
 		}
 
-		wopts := writeOpts{cfg: resolved, configBlock: configBlockFor(p.node, resolved)}
+		wopts := writeOpts{cfg: resolved, configBlock: configBlockFor(p.node)}
 		if changes := writeDoc(dst, p.node, doc, wopts); len(changes) > 0 {
 			for _, c := range changes {
 				rep.Changes = append(rep.Changes, Change{Node: p.node.UniqueID, File: p.to, Detail: c})
@@ -296,7 +296,7 @@ func parallel(n int, body func(i int)) {
 // dbt-osmosis' fusion_compat detection does. A manifest whose version cannot be
 // read is treated as old, which is the safe direction: writing meta under
 // `config:` on a dbt that does not read it there loses it silently.
-func configBlockFor(n *dbt.Node, _ config.Resolved) bool {
+func configBlockFor(n *dbt.Node) bool {
 	if n.Manifest == nil {
 		return false
 	}
@@ -307,39 +307,22 @@ func configBlockFor(n *dbt.Node, _ config.Resolved) bool {
 func loadProjects(cfg *config.Config) ([]*dbt.Project, error) {
 	out := make([]*dbt.Project, len(cfg.Projects))
 	errs := make([]error, len(cfg.Projects))
-	var wg sync.WaitGroup
-	for i, ref := range cfg.Projects {
-		wg.Add(1)
-		go func(i int, ref config.ProjectRef) {
-			defer wg.Done()
-			// A manifest-only ref (a dbt-loom upstream) has no project
-			// directory to read dbt_project.yml from.
-			if ref.Manifest != "" {
-				man := ref.Manifest
-				if !filepath.IsAbs(man) {
-					man = filepath.Join(cfg.Dir, man)
-				}
-				p, err := dbt.LoadManifestOnly(ref.Name, man)
-				if err != nil {
-					errs[i] = fmt.Errorf("project %s: %w", ref.Manifest, err)
-					return
-				}
-				out[i] = p
-				return
+	parallel(len(cfg.Projects), func(i int) {
+		ref := cfg.Projects[i]
+		// A manifest-only ref (a dbt-loom upstream) has no project directory to
+		// read dbt_project.yml from.
+		if ref.Manifest != "" {
+			out[i], errs[i] = dbt.LoadManifestOnly(ref.Name, absTo(cfg.Dir, ref.Manifest))
+			if errs[i] != nil {
+				errs[i] = fmt.Errorf("project %s: %w", ref.Manifest, errs[i])
 			}
-			root := ref.Path
-			if !filepath.IsAbs(root) {
-				root = filepath.Join(cfg.Dir, root)
-			}
-			p, err := dbt.LoadProject(root, ref.Target, !ref.Upstream)
-			if err != nil {
-				errs[i] = fmt.Errorf("project %s: %w", ref.Path, err)
-				return
-			}
-			out[i] = p
-		}(i, ref)
-	}
-	wg.Wait()
+			return
+		}
+		out[i], errs[i] = dbt.LoadProject(absTo(cfg.Dir, ref.Path), ref.Target, !ref.Upstream)
+		if errs[i] != nil {
+			errs[i] = fmt.Errorf("project %s: %w", ref.Path, errs[i])
+		}
+	})
 	for _, err := range errs {
 		if err != nil {
 			return nil, err
@@ -451,6 +434,13 @@ func defaultSchemaPath(n *dbt.Node) string {
 		return src
 	}
 	return filepath.ToSlash(filepath.Join(filepath.Dir(src), "_"+n.Name+".yml"))
+}
+
+func absTo(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
 }
 
 func relTo(projects []*dbt.Project, abs string) string {

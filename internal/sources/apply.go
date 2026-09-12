@@ -15,17 +15,11 @@ import (
 // Apply folds provider documentation into the loaded projects, before the graph
 // is built and anything is resolved.
 //
-// It does this by writing a **catalog entry** for each documented source rather
-// than inventing a parallel mechanism. A catalog is already the thing that says
-// what columns a relation really has, in what order, with what types and what
-// warehouse comment, and every part of the resolver already knows how to read
-// one — column injection, stale-column removal, ordering, struct expansion. A
-// provider is therefore a catalog for the sources that `dbt docs generate`
-// would have had to walk the whole project to reach.
-//
-// What a catalog has no room for — meta, tags, labels, a policy tag — is
-// written onto the source's manifest columns instead, which is where
-// inheritance reads from.
+// A documented source becomes a **catalog entry** rather than a parallel
+// mechanism: a catalog already says what columns a relation has, in what order
+// and with what types and comments, and the resolver already reads one. What a
+// catalog has no room for — meta, tags, labels, a policy tag — goes onto the
+// source's manifest columns, which is where inheritance reads from.
 //
 // Returns the warnings worth printing.
 func Apply(set *Set, sources []*dbt.Node, cfg config.Resolved) []string {
@@ -48,9 +42,8 @@ func applyOne(n *dbt.Node, doc *Doc, cfg config.Resolved) []string {
 	var warnings []string
 	labels := cfg.SourceLabels
 
-	// Node level. A description written by hand always wins: a provider is a
-	// machine reporting what the warehouse says, and this tool's standing rule
-	// is that it never overwrites a person.
+	// A description written by hand always wins: this tool never overwrites a
+	// person.
 	if n.Description == "" {
 		n.Description = doc.Description
 	}
@@ -78,9 +71,8 @@ func applyOne(n *dbt.Node, doc *Doc, cfg config.Resolved) []string {
 		}
 		index := c.Index
 		if index == 0 {
-			// No opinion about ordinals: the order the provider listed them in
-			// is the best information there is, and a catalog with every index
-			// at zero sorts alphabetically instead.
+			// No opinion about ordinals: fall back to the listed order, since a
+			// catalog with every index at zero would sort alphabetically.
 			index = i + 1
 		}
 		entry.Columns[c.Name] = dbt.CatalogColumn{
@@ -103,10 +95,9 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 
 	col := n.Column(c.Name, cfg.CaseInsensitive)
 	if col == nil {
-		// Nothing here yet. An entry is created so inheritance downstream can
-		// see the column at all; the description stays on the catalog side,
-		// where the existing precedence rules already place a warehouse comment
-		// below anything written by hand.
+		// An entry is created so inheritance downstream can see the column at
+		// all; the description stays on the catalog side, where the existing
+		// precedence already ranks a warehouse comment below hand-written text.
 		col = &dbt.Column{Name: c.Name, DataType: c.DataType}
 		if n.Columns == nil {
 			n.Columns = map[string]*dbt.Column{}
@@ -115,16 +106,10 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 		n.InvalidateColumnIndex()
 	}
 
-	// The provider's description is the column's own, not an inherited one, so
-	// it is written onto the manifest column rather than left as a catalog
-	// comment. A comment is governed by `columns.comments`, which defaults to
-	// "new" to match dbt-osmosis — and that rule would skip this column, since
-	// the source YAML already lists it. For an external source that is the
-	// wrong answer: nothing upstream exists, so the warehouse's description is
-	// the only documentation there will ever be.
-	//
-	// A description written by hand still wins, because it is already on the
-	// manifest column and this fills blanks only.
+	// Written onto the manifest column rather than left as a catalog comment:
+	// `columns.comments` defaults to "new", which would skip a column the source
+	// YAML already lists — and for an external source that is wrong, since
+	// nothing upstream exists. Hand-written text still wins; this fills blanks.
 	if col.Description == "" {
 		col.Description = c.Description
 	}
@@ -132,7 +117,7 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 	for k, v := range c.Meta {
 		setMeta(col, k, v)
 	}
-	col.Tags = unionTags(col.Tags, c.Tags)
+	col.Tags = dbt.UnionTags(col.Tags, c.Tags)
 
 	// Extra keys are carried only when the project asked for them by name, so a
 	// provider reporting a policy tag into a project that never configured
@@ -151,11 +136,9 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 	}
 
 	if labels.Routed() {
-		// Written into the manifest column, which is what inheritance reads, so
-		// a label travels downstream with the column exactly as a description
-		// does. Keeping it from travelling is not done here: `propagate.column`
-		// adds the label meta key to the skip list inheritance already consults,
-		// so there is one mechanism for "meta that stays put" rather than two.
+		// Into the manifest column, so a label travels downstream exactly as a
+		// description does. Stopping that is not done here: `propagate.column`
+		// adds the key to the skip list inheritance already consults.
 		applyColumnLabels(col, kept, labels)
 	}
 	return dropped
@@ -189,11 +172,9 @@ func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	c.Invalidate()
 }
 
-// applyNodeLabels routes a relation's own labels onto the source entry.
-//
-// These never travel: node meta is not inherited by anything in this tool, and
-// that is the right answer rather than an accident. A label saying who pays for
-// a table is false the moment it is copied onto a model in another dataset.
+// applyNodeLabels routes a relation's own labels onto the source entry. These
+// never travel — node meta is not inherited by anything here — and should not:
+// a label saying who pays for a table is false once copied to another dataset.
 func applyNodeLabels(n *dbt.Node, labels map[string]string, l config.ResolvedLabels) {
 	if len(labels) == 0 {
 		return
@@ -213,7 +194,7 @@ func applyNodeLabels(n *dbt.Node, labels map[string]string, l config.ResolvedLab
 		}
 	}
 	if l.ToTags() {
-		n.Tags = unionTags(n.Tags, RenderTags(labels, l))
+		n.Tags = dbt.UnionTags(n.Tags, RenderTags(labels, l))
 	}
 }
 
@@ -232,7 +213,7 @@ func applyColumnLabels(col *dbt.Column, labels map[string]string, l config.Resol
 		}
 	}
 	if l.ToTags() {
-		col.Tags = unionTags(col.Tags, RenderTags(labels, l))
+		col.Tags = dbt.UnionTags(col.Tags, RenderTags(labels, l))
 	}
 }
 
@@ -322,21 +303,6 @@ func setMetaIfAbsent(col *dbt.Column, key string, value any) {
 		}
 	}
 	setMeta(col, key, value)
-}
-
-func unionTags(existing, add []string) []string {
-	if len(add) == 0 {
-		return existing
-	}
-	seen := make(map[string]bool, len(existing)+len(add))
-	out := make([]string, 0, len(existing)+len(add))
-	for _, t := range append(append([]string(nil), existing...), add...) {
-		if !seen[t] {
-			seen[t] = true
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // RequestFor turns the external sources into the request a provider receives,

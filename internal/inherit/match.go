@@ -120,7 +120,7 @@ func leaf(name string) string {
 // `max_order_count` into `order`, which is no longer obviously the same thing,
 // and a wrong description is worse than none.
 func (m *matcher) stripAggregate(name string) []string {
-	if !m.cfg.DerivedAggregates {
+	if name == "" || !m.cfg.DerivedAggregates {
 		return nil
 	}
 
@@ -180,31 +180,36 @@ func trimWord(name, word string, prefix bool) (string, bool) {
 	return "", false
 }
 
+// eachKey calls yield with every folded lookup key a column name can be found
+// under, and the rank at which that key counts as a match. keysFor and indexFor
+// are the two sides of the same lookup, so they derive their keys from here.
+func (m *matcher) eachKey(name string, yield func(matchRank, string)) {
+	yield(matchExact, m.fold(name))
+	if !m.enabled() {
+		return
+	}
+	l := ""
+	if m.cfg.DerivedStructs {
+		if s := leaf(name); s != name {
+			l = s
+			yield(matchLeaf, m.fold(l))
+		}
+	}
+	for _, stripped := range m.stripAggregate(name) {
+		yield(matchAggregate, m.fold(stripped))
+	}
+	for _, stripped := range m.stripAggregate(l) {
+		yield(matchLeafAggregate, m.fold(stripped))
+	}
+}
+
 // keysFor returns the lookup keys for a downstream column name, grouped by the
 // rank at which each may match.
 func (m *matcher) keysFor(name string) [matchNone][]string {
 	var keys [matchNone][]string
-	keys[matchExact] = []string{m.fold(name)}
-
-	if !m.enabled() {
-		return keys
-	}
-
-	if m.cfg.DerivedStructs {
-		if l := leaf(name); l != name {
-			keys[matchLeaf] = append(keys[matchLeaf], m.fold(l))
-		}
-	}
-	for _, stripped := range m.stripAggregate(name) {
-		keys[matchAggregate] = append(keys[matchAggregate], m.fold(stripped))
-	}
-	if m.cfg.DerivedStructs {
-		if l := leaf(name); l != name {
-			for _, stripped := range m.stripAggregate(l) {
-				keys[matchLeafAggregate] = append(keys[matchLeafAggregate], m.fold(stripped))
-			}
-		}
-	}
+	m.eachKey(name, func(rank matchRank, key string) {
+		keys[rank] = append(keys[rank], key)
+	})
 	return keys
 }
 
@@ -230,40 +235,21 @@ func (m *matcher) indexFor(n *dbt.Node) *columnIndex {
 	}
 
 	for name, c := range n.Columns {
-		put(matchExact, m.fold(name), c)
-		if !m.enabled() {
-			continue
-		}
-		if m.cfg.DerivedStructs {
-			if l := leaf(name); l != name {
-				put(matchLeaf, m.fold(l), c)
-			}
-		}
-		for _, stripped := range m.stripAggregate(name) {
-			put(matchAggregate, m.fold(stripped), c)
-		}
-		if m.cfg.DerivedStructs {
-			if l := leaf(name); l != name {
-				for _, stripped := range m.stripAggregate(l) {
-					put(matchLeafAggregate, m.fold(stripped), c)
-				}
-			}
-		}
+		m.eachKey(name, func(rank matchRank, key string) { put(rank, key, c) })
 	}
 
 	actual, _ := m.indexes.LoadOrStore(n, idx)
 	return actual.(*columnIndex)
 }
 
-// find returns the ancestor column a downstream column should inherit from.
+// find returns the ancestor column a downstream column should inherit from,
+// and how far the match had to travel. The rank matters beyond bookkeeping: a
+// description survives being summed and a classification does not, so it
+// decides what is carried across.
 //
-// The second return value reports whether the ancestor has the column at all,
-// even undocumented, because that is what decides whether the ancestor claims
-// the column for its generation and shadows everything behind it.
-// find returns the ancestor's matching column and how far the match had to
-// travel to get there. The rank matters beyond bookkeeping: a description
-// survives being summed, and a classification does not, so what is carried
-// across depends on which kind of match found the column.
+// The last return value reports whether the ancestor has the column at all,
+// even undocumented, which is what decides whether the ancestor claims the
+// column for its generation and shadows everything behind it.
 func (m *matcher) find(a *dbt.Node, name string, keys [matchNone][]string) (*dbt.Column, matchRank, bool) {
 	if c, rank := m.indexFor(a).lookup(keys); rank != matchNone {
 		return c, rank, true

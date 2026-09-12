@@ -12,13 +12,9 @@ import (
 
 // applySources documents the external sources — the raw tables no loaded
 // project builds — from the source-provider cache, refreshing it first when
-// asked.
-//
-// The cache is the whole reason this is safe to have on by default. Providers
-// are network calls, and `--check` runs in CI, where a flaky API must not fail
-// a formatting check and where the runner may hold no warehouse credentials at
-// all. So an ordinary run reads a file and spawns nothing; refreshing is a
-// thing someone asks for.
+// asked. The cache is what makes this safe on by default: an ordinary run reads
+// a file and spawns nothing, so `--check` in CI needs no credentials and cannot
+// be failed by a flaky API.
 func applySources(cfg *config.Config, resolved config.Resolved, graph *inherit.Graph, opts Options) ([]string, error) {
 	external, _ := graph.ClassifySources()
 	if len(external) == 0 {
@@ -80,13 +76,11 @@ func sourceProviders(cfg *config.Config) []sources.Provider {
 	return out
 }
 
-// shadowedSourceWarnings reports a `source:` that points at a relation one of
-// the loaded projects builds. It inherits nothing, because a source is a DAG
-// root, while the model behind it is documented — so this is almost always a
-// declaration that wants to be a cross-project ref instead.
+// shadowedSourceWarnings reports a `source:` pointing at a relation a loaded
+// project builds: a DAG root that inherits nothing, standing in front of a
+// documented model, which almost always wants to be a cross-project ref.
 //
-// Restricted to the selected nodes so `--select` stays meaningful: a run
-// targeting one model should not narrate every source in the repository.
+// Restricted to the selected nodes, so `--select` stays meaningful.
 func shadowedSourceWarnings(graph *inherit.Graph, targets []*dbt.Node) []inherit.Warning {
 	_, shadowed := graph.ClassifySources()
 	if len(shadowed) == 0 {
