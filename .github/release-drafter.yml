@@ -66,4 +66,4 @@ template: |
   ---
 
   Publishing this release creates the tag, which builds the archives and the
-  platform wheels, publishes to PyPI, and mirrors the dbt package.
+  platform wheels, and publishes to PyPI.

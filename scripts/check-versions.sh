@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Checks that everything claiming to be "the version" agrees.
 #
-# Three files carry a version string by hand and nothing forces them to match,
-# so the first release would ship a wheel called 0.2.0 next to a dbt package
-# still calling itself 0.1.0. This is the thing that stops that.
+# pyproject.toml carries a version string by hand and nothing forces it to match
+# the tag, so a release could ship a wheel called 0.2.0 from a tree still calling
+# itself 0.1.0. This is the thing that stops that.
 #
 #   ./scripts/check-versions.sh           # against the current tag
 #   ./scripts/check-versions.sh v0.2.0    # against a tag being prepared
@@ -25,7 +25,7 @@ if [[ -z "${TAG}" ]]; then
   exit 2
 fi
 
-# `v0.2.0` and `0.2.0` are the same release; the hub accepts either spelling.
+# `v0.2.0` and `0.2.0` are the same release.
 want="${TAG#v}"
 
 status=0
@@ -43,9 +43,6 @@ echo "==> versions against tag ${TAG}"
 
 check "pyproject.toml" \
   "$(grep -m1 '^version *= *' "${ROOT}/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/')"
-
-check "packaging/dbt-ditto/dbt_project.yml" \
-  "$(grep -m1 '^version:' "${ROOT}/packaging/dbt-ditto/dbt_project.yml" | sed 's/.*"\(.*\)".*/\1/')"
 
 # The wheel builder normalises the tag itself (v0.2.0 → 0.2.0, and a PEP 440
 # error for anything it cannot make sense of), so asking it is the real check

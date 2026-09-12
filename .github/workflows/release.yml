@@ -2,7 +2,7 @@ name: release
 
 # Publishing the draft release is the release. GitHub creates the tag at that
 # moment — there is no tag before it — and this workflow turns that tag into
-# archives, wheels, a PyPI upload and the dbt package mirror.
+# archives, wheels and a PyPI upload.
 #
 # The draft itself is maintained by draft-release.yml, which computes the
 # version from pull request labels. So the only manual act in a release is
@@ -24,9 +24,9 @@ env:
   GOFLAGS: -mod=vendor
 
 jobs:
-  # The version lives in three places by hand and the tag is the authority, so
-  # the files are brought to the tag rather than the release being refused for
-  # disagreeing with them. `main` ends up recording what was released.
+  # pyproject.toml carries a version by hand and the tag is the authority, so
+  # the file is brought to the tag rather than the release being refused for
+  # disagreeing with it. `main` ends up recording what was released.
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -44,14 +44,13 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.event.release.tag_name }}
 
-      - name: write the released version into the files that carry it
+      - name: write the released version into the file that carries it
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
           sed -i -E "0,/^version = \".*\"/s//version = \"${version}\"/" pyproject.toml
-          sed -i -E "0,/^version: \".*\"/s//version: \"${version}\"/" packaging/dbt-ditto/dbt_project.yml
 
       # Runs after the rewrite, so it is checking that the rewrite worked rather
       # than that someone remembered. A tag is the one thing here that cannot be
@@ -61,7 +60,7 @@ jobs:
       # Publishing the draft creates the tag at main's head, which is the commit
       # *before* the bump above. Left alone, the tag would point at files
       # claiming the previous version, and everything downstream that checks out
-      # the tag — the wheels, the mirror — would disagree with it.
+      # the tag — the archives, the wheels — would disagree with it.
       #
       # So the tag is moved onto the bump commit. Force-moving a tag is
       # ordinarily something to avoid, and it is safe here for one reason: this
@@ -75,7 +74,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml packaging/dbt-ditto/dbt_project.yml
+          git add pyproject.toml
           if git diff --cached --quiet; then
             echo "already at ${TAG}; nothing to move"
             exit 0
@@ -134,7 +133,11 @@ jobs:
         with:
           name: wheels
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Pinned to a commit, not `@release/v1`. That tag is a moving branch-like
+      # ref the maintainers repoint, and this is the one step in the repository
+      # holding `id-token: write` — an upstream compromise there would be a
+      # token that can publish to PyPI as this project.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   # The release already exists — publishing its draft is what got us here — so
   # the archives are attached to it rather than a new one being created.
@@ -154,15 +157,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
         run: gh release upload "${TAG}" dist/* --clobber
-
-  # Called rather than left to fire on the tag: a tag created by GitHub's own
-  # token does not trigger `on: push: tags`, so a tag-triggered mirror would
-  # silently never run.
-  mirror:
-    needs: version
-    permissions:
-      contents: read
-    uses: ./.github/workflows/mirror-dbt-ditto.yml
-    with:
-      tag: ${{ needs.version.outputs.tag }}
-    secrets: inherit

@@ -182,31 +182,9 @@ internal/yamlfile/    yaml.Node editing preserving comments and key order
 packaging/providers/  the BigQuery and Snowflake providers, in Python
 testdata/projects/    platform (upstream) + analytics (downstream, via dbt-loom)
 testdata/golden/      recorded dbt-osmosis output + dbt-ditto' cross-project output
-packaging/dbt-ditto/  the dbt package: run-operation macros + run.py launcher
 packaging/pypi/       wheel builder carrying the binary
 scripts/              build-fixture.sh, parity.sh, bench.sh, allow-sandbox.sh
 ```
-
-## The dbt package
-
-`packaging/dbt-ditto` is installable with `dbt deps` (`git:` + `subdirectory:`, or via
-the hub once mirrored — see its README). Its hard constraint, which no amount of
-cleverness gets around: **dbt's Jinja cannot open a file or execute a program**.
-So the split is:
-
-- `dbt_ditto_suggest` — pure Jinja over dbt's `graph`. Prints the YAML that
-  would be inherited, plus directive and ambiguity warnings. Writes nothing.
-  It duplicates the resolver's logic in Jinja, deliberately: it must keep
-  working with no binary installed. It is a *preview*; the binary is the
-  authority, and knows more (catalog, cross-project, column add/remove).
-- `dbt_ditto_install` — prints the launcher command with the given args.
-- `run.py` — finds `dbt-ditto` on `PATH`, else `uvx dbt-ditto`, else explains
-  how to install. Runs from the project root, two levels above itself.
-
-`make dbt-package` (`scripts/dbt-package.sh`) installs it into a scratch copy of
-the platform fixture with a real `dbt deps`, appends two directive columns (one
-resolvable, one not), runs both operations and greps the output. Needs `.venv`.
-It is the only test of the macros: Go cannot reach them.
 
 ## Publishing
 
@@ -218,8 +196,7 @@ pull requests merged since the last release, and its version from their labels
 unlabelled → patch, per `.github/release-drafter.yml`).
 
 Nothing is tagged until someone presses Publish. That is what creates the tag,
-and the tag is what `release.yml` turns into archives, wheels, a PyPI upload and
-the mirror. So `main` is always releasable and never accidentally released, and
+and the tag is what `release.yml` turns into archives, wheels and a PyPI upload. So `main` is always releasable and never accidentally released, and
 the release notes are written continuously rather than remembered at the end.
 
 The labels are part of the machinery, not decoration, which is why they live in
@@ -229,33 +206,23 @@ by hand and drifting from the resolver that reads them.
 Two ordering facts that the workflows exist to work around:
 
 - **The tag is created at `main`'s head, before the version bump.** `release.yml`
-  rewrites `pyproject.toml` and `dbt_project.yml` from the tag, commits that to
-  `main`, and then **force-moves the tag onto the bump commit** — otherwise the
+  rewrites `pyproject.toml` from the tag, commits that to `main`, and then **force-moves the tag onto the bump commit** — otherwise the
   tag points at files claiming the previous version and everything downstream
   that checks out the tag disagrees with it. Moving it is safe only because it
   happens seconds after publication and before anything has been built.
-- **A tag created by GitHub's own token does not fire `on: push: tags`.** So the
-  mirror is a `workflow_call` invoked by `release.yml` rather than a
-  tag-triggered workflow, which would silently never run.
 
 The workflows:
 
 | | trigger | does |
 | --- | --- | --- |
-| `ci.yml` | push, PR | gofmt, vet, test on Linux and macOS, race, shellcheck, provider tests, `dbt-package.sh`, live `parity.sh --check` |
+| `ci.yml` | push, PR | gofmt, vet, test on Linux and macOS, race, shellcheck, provider tests, live `parity.sh --check` |
 | `draft-release.yml` | push to `main`, PR labelled | release-drafter: updates the draft's notes and next version. Tags nothing |
 | `labeler.yml` | `.github/labels.yml` changes | syncs the labels release-drafter reads |
-| `release.yml` | draft release **published** | version bump + tag move, `dist.sh` archives, wheels, PyPI via trusted publishing, attaches assets, calls the mirror |
-| `mirror-dbt-ditto.yml` | called by `release.yml` | copies `packaging/dbt-ditto/` to the root of `rognerud/dbt_ditto` and tags it |
-| `scripts/check-versions.sh` | called by both | tag vs `pyproject.toml` vs `dbt_project.yml` vs the wheel's normalised version |
+| `release.yml` | draft release **published** | version bump + tag move, `dist.sh` archives, wheels, PyPI via trusted publishing, attaches assets |
+| `scripts/check-versions.sh` | called by `release.yml` | tag vs `pyproject.toml` vs the wheel's normalised version |
 
-**Order matters on the first release.** `run.py` falls back to
-`uvx dbt-ditto`, so a dbt-ditto listing that lands before the wheel exists on
-PyPI sends every user without the binary straight to an install hint. Publish
-PyPI first, then open the hubcap PR.
-
-Setup that cannot be done from inside the repository, and which the workflows
-assume:
+Setup that cannot be done from inside the repository, and which `release.yml`
+assumes:
 
 1. **PyPI trusted publishing** for `dbt-ditto`: workflow `release.yml`,
    environment `pypi`. No API token is stored anywhere; the `pypi` job requests
@@ -265,21 +232,8 @@ assume:
    since the project does not exist on PyPI yet and the ordinary form is
    configured from a project's settings page. A GitHub environment called `pypi`
    has to exist on this repository too, or the job never runs.
-2. **The mirror repo** `rognerud/dbt_ditto`, empty and public, plus a
-   fine-grained PAT with Contents: read+write on it, stored as the secret
-   `MIRROR_TOKEN`. `GITHUB_TOKEN` cannot push across repositories.
 
-   The underscore is load-bearing twice over: dbt packages are named with one,
-   and the mirror cannot be `rognerud/dbt-ditto` because that is this
-   repository. An earlier draft of the workflow said `gislerognerud/dbt-ditto`,
-   which is neither the right owner nor a name that can exist.
-3. **The hubcap PR**: add `"rognerud": ["dbt_ditto"]` to `hub.json` in
-   [dbt-labs/hubcap](https://github.com/dbt-labs/hubcap). Reviewed by a human at
-   dbt Labs; indexing is hourly afterwards, so later releases need only a tag.
-
-The mirror is deliberately a *derived* artefact: the whole tree is replaced on
-each release, so a file deleted here disappears there. Never commit to the
-mirror by hand.
+That is the whole of it. Nothing else needs a secret.
 
 ## Performance notes
 
@@ -438,8 +392,7 @@ at all.
   project used to be called `loomsmosis`, and the three `profiles.yml` files
   under `testdata/` were still asking for `LOOMSMOSIS_DB` long after every
   script had been renamed to export `DBT_DITTO_DB`. Nothing caught it because
-  the only things that read those profiles — `dbt-package.sh`, `parity.sh`,
-  `matrix.sh` — need dbt, so `go test` is silent about it and the failure only
+  the only things that read those profiles — `parity.sh` and `matrix.sh` — need dbt, so `go test` is silent about it and the failure only
   appears the first time CI runs one of them:
   `Parsing Error: Env var required but not provided`. Rename both halves
   together.
@@ -483,29 +436,25 @@ Done:
 - [x] Distribution: `scripts/dist.sh` (static archives for six targets) and
       `packaging/pypi/build_wheels.py` (platform wheels carrying the binary),
       verified by `scripts/verify-wheels.sh` under both pip and uv
-- [x] Directives (`Inherited: node.column`) and ambiguity warnings, in both the
-      binary and the dbt package's macros
+- [x] Directives (`Inherited: node.column`) and ambiguity warnings
 - [x] Provenance on by default (`inheritance.progenitor`)
-- [x] dbt package in `packaging/dbt-ditto`, proved by `make dbt-package`
 - [x] Source providers: external sources documented from the warehouse by an
       external program, with reference providers for **BigQuery and Snowflake**
       in `packaging/providers/`. The binary gains no dependency and still
       connects to nothing; providers reuse dbt's own `profiles.yml`. Design and
       status in [.agents/source-providers.md](.agents/source-providers.md)
 
-- [x] CI/CD: `.github/workflows/{ci,release,mirror-dbt-ditto}.yml` and
+- [x] CI/CD: `.github/workflows/{ci,draft-release,labeler,release}.yml` and
       `scripts/check-versions.sh`
 
 Not done, and needs a decision:
 
 - [ ] **Nothing is released.** There is no tag, and CI has never run on anything
-      past the initial commit. `pyproject.toml` and
-      `packaging/dbt-ditto/dbt_project.yml` both say `0.1.0` and agree, so
+      past the initial commit. `pyproject.toml` says `0.1.0`, so
       `check-versions.sh` passes and `v0.1.0` is taggable as it stands.
 - [ ] The account-side setup the workflows depend on (see "Publishing" above):
-      the PyPI pending publisher, the `pypi` GitHub environment, the
-      `rognerud/dbt_ditto` mirror repo, `MIRROR_TOKEN`, the hubcap PR. None of
-      it can be done from inside the repository.
+      the PyPI pending publisher and the `pypi` GitHub environment. Neither can
+      be done from inside the repository.
 - [ ] **The source providers are not distributed anywhere.** The wheel carries
       the binary and nothing else — that is `build_wheels.py`'s design — so
       `pip install dbt-ditto` gets a binary that can run providers and no

@@ -15,7 +15,6 @@ make bench           # head-to-head timing, then synthetic scaling
 make fixture         # rebuild the DuckDB warehouse and dbt artifacts
 make matrix          # re-capture artifacts by running real dbt, once per version
 make matrix-test     # replay every captured dbt version and adapter (Go only)
-make dbt-package     # install packaging/dbt-ditto with dbt deps and run its macros
 make providers       # the source providers' offline tests (no warehouse account)
 make hooks           # install the git hooks in lefthook.yml
 make dist            # cross-compile release archives into dist/
@@ -23,7 +22,7 @@ make wheels          # build the PyPI wheels into dist/pypi/
 make verify-wheels   # build them and prove they install and run under pip and uv
 ```
 
-`make parity`, `make bench`, `make fixture`, `make dbt-package`, `make providers`
+`make parity`, `make bench`, `make fixture`, `make providers`
 and the wheel targets need the Python environment (`uv sync`); everything else
 needs only Go.
 All Go work runs vendored, with the build cache inside the repository.
@@ -44,7 +43,6 @@ internal/yamlfile/    yaml.Node editing that preserves comments and key order
 testdata/projects/    the two-project DuckDB fixture
 testdata/golden/      recorded dbt-osmosis output, and dbt-ditto's own for the
                       cross-project case
-packaging/dbt-ditto/  the dbt package: run-operation macros and the launcher
 packaging/providers/  the BigQuery and Snowflake source providers, in Python
 packaging/pypi/       the wheel builder that ships the binary
 scripts/              fixture build, parity harness, benchmark harness
@@ -263,12 +261,13 @@ computes. What got it there:
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race detector, shellcheck, the source providers' offline tests, the dbt package smoke test, and the live dbt-osmosis parity diff |
-| `release.yml` | `v*` tag | cross-compiled archives, wheels, PyPI via trusted publishing, GitHub release |
-| `mirror-dbt-ditto.yml` | `v*` tag | publishes `packaging/dbt-ditto/` to the mirror repository the dbt package hub indexes |
+| `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race detector, shellcheck, the source providers' offline tests, and the live dbt-osmosis parity diff |
+| `draft-release.yml` | push to `main` | keeps one draft release up to date, version resolved from PR labels |
+| `labeler.yml` | `.github/labels.yml` changes | syncs the labels release-drafter reads |
+| `release.yml` | draft release **published** | version bump + tag move, cross-compiled archives, wheels, PyPI via trusted publishing, release assets |
 
-`scripts/check-versions.sh` gates a release on the tag, `pyproject.toml` and
-`dbt_project.yml` agreeing. AGENTS.md covers the account-side setup each
+`scripts/check-versions.sh` gates a release on the tag and `pyproject.toml`
+agreeing. AGENTS.md covers the account-side setup each
 workflow needs.
 
 A release is a `v*` tag, not a merge: `main` is what CI proves, and the tag is

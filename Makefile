@@ -8,7 +8,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse -q --verify HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build test test-short race vet bench parity parity-check fixture matrix matrix-test dbt-package providers hooks dist wheels verify-wheels clean help
+.PHONY: all build test test-short race vet bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
 
 all: vet test build
 
@@ -60,10 +60,6 @@ matrix:
 matrix-test: | $(TMPDIR)
 	go test ./internal/runner/ -run Matrix -v
 
-## dbt-package: install packaging/dbt-ditto into the fixture with dbt deps and run its macros
-dbt-package:
-	./scripts/dbt-package.sh
-
 ## providers: run the source providers' offline tests (no warehouse account needed)
 providers:
 	./scripts/providers.sh
@@ -84,7 +80,7 @@ $(TMPDIR):
 	@mkdir -p $(TMPDIR)
 
 clean:
-	rm -rf bin dist .gocache/parity .gocache/bench .gocache/dist .gocache/dbt-package
+	rm -rf bin dist .gocache/parity .gocache/bench .gocache/dist
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'

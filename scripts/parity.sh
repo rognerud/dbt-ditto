@@ -38,8 +38,30 @@ mkdir -p "${TMPDIR}"
 if [[ ! -f "${DBT_DITTO_DB}" ]]; then
   echo "==> building the fixture warehouse"
   mkdir -p "${ROOT}/.gocache"
+
+  # Only the warehouse is wanted from this. build-fixture.sh also rewrites the
+  # committed target/manifest.json, and that must not survive, because dbt does
+  # not order the nodes in a manifest deterministically: two parses of the same
+  # project on the same machine can list two models in either order.
+  #
+  # It matters because selectNodes lays models out in manifest order, and when
+  # several share one schema file that order is visible in the bytes. The
+  # committed manifest is the one dbt-osmosis was recorded against, so keeping
+  # it is what makes the comparison a comparison, rather than a coin toss
+  # between two independent parses.
+  SAVED="$(mktemp -d "${TMPDIR%/}/parity-artifacts.XXXXXX")"
+  for project in platform analytics; do
+    cp -R "${ROOT}/testdata/projects/${project}/target" "${SAVED}/${project}"
+  done
+
   "${ROOT}/scripts/build-fixture.sh" >"${ROOT}/.gocache/parity-fixture.log" 2>&1 ||
     { cat "${ROOT}/.gocache/parity-fixture.log"; exit 1; }
+
+  for project in platform analytics; do
+    rm -rf "${ROOT}/testdata/projects/${project}/target"
+    cp -R "${SAVED}/${project}" "${ROOT}/testdata/projects/${project}/target"
+  done
+  rm -rf "${SAVED}"
 fi
 
 rm -rf "${WORK}"

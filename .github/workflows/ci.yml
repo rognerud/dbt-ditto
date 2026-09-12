@@ -81,22 +81,6 @@ jobs:
       - run: uv sync
       - run: ./scripts/providers.sh
 
-  # The macros in packaging/dbt-ditto run inside dbt's own Jinja, which Go
-  # cannot reach. This is the only thing that tests them.
-  dbt-package:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync
-      - run: ./scripts/dbt-package.sh
-
   # The parity proof, run for real: dbt-osmosis against dbt-ditto over the
   # DuckDB fixture. `go test` replays the recorded result, but only this catches
   # dbt-osmosis itself changing under us.

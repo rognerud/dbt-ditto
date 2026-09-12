@@ -212,9 +212,8 @@ Command-line flags — `--check`, `--dry-run`, `--select`, `-c`, `--verbose`,
 ## Scope of reuse
 
 Meant to be used by any dbt project, not just this repository's own: it is
-published as a PyPI wheel carrying the binary (`uv add dbt-ditto`), as a Go
-module, and as a dbt package of run-operation macros under
-`packaging/dbt-ditto/`. Configuration is read from `dbt_ditto.yml`, and from the
+published as a PyPI wheel carrying the binary (`uv add dbt-ditto`) and as a Go
+module. Configuration is read from `dbt_ditto.yml`, and from the
 `+dbt-osmosis:` rules a project already has. Support is best-effort via GitHub
 issues.
 
@@ -228,8 +227,6 @@ issues.
   benchmarks, CI and packaging.
 - [AGENTS.md](AGENTS.md) — architecture, conventions, and the traps that are not
   obvious from the code.
-- [packaging/dbt-ditto/README.md](packaging/dbt-ditto/README.md) — the dbt
-  package.
 
 ## License
 
