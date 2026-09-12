@@ -42,8 +42,7 @@ func write(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// The TOML table carries the same keys as the YAML file, including the nested
-// sections and the list of projects.
+// The TOML table carries the same keys as the YAML file, nesting included.
 func TestLoadReadsPyprojectTable(t *testing.T) {
 	dir := t.TempDir()
 	path := write(t, dir, PyprojectFilename, pyprojectWithTable)
@@ -103,8 +102,7 @@ path = "."
 	}
 }
 
-// A pyproject.toml naming no projects is the same mistake as a YAML file naming
-// none, and gets the same error.
+// A pyproject.toml naming no projects gets the same error a YAML file does.
 func TestLoadRejectsPyprojectWithoutTheTable(t *testing.T) {
 	dir := t.TempDir()
 	path := write(t, dir, PyprojectFilename, "[project]\nname = \"analytics\"\n")
@@ -118,8 +116,7 @@ func TestLoadRejectsPyprojectWithoutTheTable(t *testing.T) {
 	}
 }
 
-// A dedicated config file is a clearer statement of intent than a table in a
-// packaging file, so it wins where both are present.
+// A dedicated config file is a clearer statement of intent, so it wins.
 func TestYamlWinsOverPyprojectInTheSameDirectory(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, PyprojectFilename, pyprojectWithTable)
@@ -138,9 +135,8 @@ func TestYamlWinsOverPyprojectInTheSameDirectory(t *testing.T) {
 	}
 }
 
-// Nearly every Python project has a pyproject.toml and nearly none of them
-// configure this tool, so finding one is not by itself an answer: the search has
-// to carry on upwards as if it were not there.
+// Nearly every Python project has a pyproject.toml and nearly none configure
+// this tool, so finding one is not an answer: the search carries on upwards.
 func TestDiscoverySkipsAPyprojectWithoutTheTable(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "dbt_ditto.yml", "projects:\n  - path: .\n")
@@ -178,8 +174,8 @@ func TestDiscoveryStopsAtAPyprojectWithTheTable(t *testing.T) {
 	}
 }
 
-// A packaging file this tool cannot parse belongs to someone else's tooling.
-// Failing the run on it would make an unrelated syntax error look like ours.
+// Failing on a packaging file this tool cannot parse would make someone else's
+// syntax error look like ours.
 func TestDiscoverySkipsAnUnparseablePyproject(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "dbt_ditto.yml", "projects:\n  - path: .\n")

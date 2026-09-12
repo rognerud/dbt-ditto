@@ -10,14 +10,12 @@ import (
 
 // Warning kinds about labels a provider reported.
 const (
-	// WarnLabelAggregate: an aggregated column derives from one somebody
-	// labelled, and the label was not carried across. Said out loud because the
-	// silent version is the dangerous one — a missing description is visibly
-	// incomplete, while a missing classification reads as "not restricted".
+	// WarnLabelAggregate: an aggregated column derives from one somebody labelled, and the
+	// label was not carried across.
 	WarnLabelAggregate = "label_aggregate"
 	// WarnLabelConflict: two ancestors in one generation label the column
-	// differently, and picking between `restricted` and `public` alphabetically
-	// is not something this tool should do quietly.
+	// differently, and choosing alphabetically between `restricted` and `public` is
+	// not something this tool should do quietly.
 	WarnLabelConflict = "label_conflict"
 )
 
@@ -40,9 +38,8 @@ func copyExtra(extra map[string]any, keys []string) map[string]any {
 	return out
 }
 
-// labelKey is the meta key provider-reported labels live under, or empty when
-// labels are flattened, ignored, or routed only to tags. Empty disables every
-// rule below: a flattened label is indistinguishable from hand-typed meta.
+// labelKey is the meta key provider labels live under, or empty when they are
+// flattened, ignored, or routed only to tags.
 func (r *Resolver) labelKey() string {
 	if !r.Cfg.SourceLabels.Nested() {
 		return ""
@@ -50,11 +47,8 @@ func (r *Resolver) labelKey() string {
 	return r.Cfg.SourceLabels.MetaKey
 }
 
-// carryLabels decides whether the label map found on an ancestor travels to
-// this column, and records why not when it does not. The rule is about what the
-// match preserved: an exact name or a struct pack/unpack is the same data, an
-// aggregate is not — `avg_salary` still means salary, but the value the label
-// classified no longer exists.
+// carryLabels decides whether an ancestor's label map travels to this column, and
+// records why not when it does not.
 func (r *Resolver) carryLabels(k *knowledge, from *dbt.Node, rest []*dbt.Node,
 	name string, keys [matchNone][]string, rank matchRank, value any) bool {
 
@@ -99,7 +93,6 @@ func (r *Resolver) carryLabels(k *knowledge, from *dbt.Node, rest []*dbt.Node,
 }
 
 // labelDissent names the first ancestor in the rest of a generation whose
-// labels differ from the winner's.
 func (r *Resolver) labelDissent(rest []*dbt.Node, name string, keys [matchNone][]string, won any) (string, bool) {
 	if r.Cfg.SourceLabels.OnConflict == config.ConflictNone {
 		return "", false
@@ -129,9 +122,8 @@ func (r *Resolver) labelDissent(rest []*dbt.Node, name string, keys [matchNone][
 	return "", false
 }
 
-// sameLabels compares two label maps by content. They arrive as *OrderedMap
-// from the manifest and from a provider alike, so the comparison is over the
-// pairs rather than the container.
+// sameLabels compares two label maps by content, since they arrive as
+// *OrderedMap from the manifest and from a provider alike.
 func sameLabels(a, b any) bool {
 	am, aok := a.(*dbt.OrderedMap)
 	bm, bok := b.(*dbt.OrderedMap)

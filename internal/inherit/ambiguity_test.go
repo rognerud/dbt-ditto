@@ -7,11 +7,10 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/config"
 )
 
-// The annotation names the ancestors that were overruled, not the one that won:
-// the winner is already recorded by the progenitor key.
+// The annotation names the ancestors that were overruled, not the winner, which
+// the progenitor key already records.
 func TestAmbiguityMetaNamesTheDissenters(t *testing.T) {
-	// `model.p.other` sorts before `seed.p.raw`, so the model claims the column
-	// and the seed is the dissenter.
+	// `model.p.other` sorts before `seed.p.raw`, so the seed is the dissenter.
 	won := node("p", "other", nil, col("id", "The identifier, as the model puts it."))
 	lost := seed("p", "raw", col("id", "The identifier, as the seed puts it."))
 	down := node("p", "stg", []string{"seed.p.raw", "model.p.other"}, col("id", ""))
@@ -34,8 +33,7 @@ func TestAmbiguityMetaNamesTheDissenters(t *testing.T) {
 	}
 }
 
-// Off unless asked for: it writes meta dbt-osmosis would not, and parity with an
-// existing dbt-osmosis project is the promise.
+// Off unless asked for: it writes meta dbt-osmosis would not.
 func TestAmbiguityMetaIsOffByDefault(t *testing.T) {
 	won := seed("p", "raw", col("id", "One wording."))
 	lost := node("p", "other", nil, col("id", "Another wording."))
@@ -49,9 +47,8 @@ func TestAmbiguityMetaIsOffByDefault(t *testing.T) {
 	}
 }
 
-// A column documented locally did not inherit anything, so there is no
-// arbitrary choice to disclose — and an annotation left over from when it did
-// inherit is a stale claim, so it is removed rather than carried forward.
+// A column documented locally chose nothing arbitrarily, so a leftover
+// annotation is a stale claim and is removed rather than carried forward.
 func TestAmbiguityMetaClearedOnceSettledLocally(t *testing.T) {
 	won := seed("p", "raw", col("id", "One wording."))
 	lost := node("p", "other", nil, col("id", "Another wording."))
@@ -69,9 +66,7 @@ func TestAmbiguityMetaClearedOnceSettledLocally(t *testing.T) {
 	}
 }
 
-// The annotation belongs to the column it was computed for. Inheriting an
-// ancestor's copy would tell a downstream reader that *their* parents disagreed,
-// which is a different claim and usually a false one.
+// The annotation belongs to the column it was computed for.
 func TestAmbiguityMetaIsNotInheritedFromAnAncestor(t *testing.T) {
 	up := seed("p", "raw", col("id", "The identifier.",
 		withMeta("owner", "team", config.DefaultAmbiguityKey, []string{"model.p.somewhere"})))

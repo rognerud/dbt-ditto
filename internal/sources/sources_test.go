@@ -26,8 +26,8 @@ func TestProviderClaimsMatchOnGlobsAndIgnoreCase(t *testing.T) {
 		{"no patterns claims everything", Provider{}, true},
 		{"database glob", Provider{Database: "bq-*"}, true},
 		{"database mismatch", Provider{Database: "sf-*"}, false},
-		// Warehouse identifiers are not case sensitive in most places, and a
-		// pattern that matched only one spelling would be a trap.
+		// Warehouse identifiers are mostly not case sensitive, so a pattern matching
+		// only one spelling would be a trap.
 		{"schema folded", Provider{Schema: "raw"}, true},
 		{"both must match", Provider{Database: "bq-*", Schema: "staging"}, false},
 	}
@@ -41,8 +41,8 @@ func TestProviderClaimsMatchOnGlobsAndIgnoreCase(t *testing.T) {
 }
 
 func TestFetchReadsTheRequestAndDecodesTheAnswer(t *testing.T) {
-	// The provider proves it was given the request by echoing a unique_id it
-	// could not otherwise know.
+	// The provider proves it got the request by echoing a unique_id it could not
+	// otherwise know.
 	p := Provider{Command: `cat >/dev/null; printf '%s' '{"version":1,"sources":[{"unique_id":"source.shop.crm.customers","description":"From the CRM."}]}'`}
 
 	set := Fetch(context.Background(), []Provider{p}, nil, []RequestSource{customers()})
@@ -57,8 +57,7 @@ func TestFetchReadsTheRequestAndDecodesTheAnswer(t *testing.T) {
 
 func TestAProviderThatFailsIsAWarningNotAnError(t *testing.T) {
 	// A tool that tidies YAML should still tidy it when the warehouse is
-	// unreachable. The last line of stderr is carried through, because a Python
-	// traceback is twenty lines of noise and one line of explanation.
+	// unreachable, carrying the last line of stderr through as the explanation.
 	bad := Provider{Command: `cat >/dev/null; echo "Traceback (most recent call last):" >&2; echo "PermissionDenied: no access" >&2; exit 1`}
 	good := Provider{Command: `cat >/dev/null; printf '%s' '{"version":1,"sources":[{"unique_id":"source.shop.crm.customers"}]}'`}
 
@@ -121,8 +120,7 @@ func TestCacheRoundTrips(t *testing.T) {
 }
 
 // A missing cache means no enrichment, exactly as a missing catalog.json means
-// no column reconciliation. That is what lets --check run on a machine with no
-// credentials and no provider installed.
+// no column reconciliation, which is what lets --check run without credentials.
 func TestAMissingCacheIsNotAnError(t *testing.T) {
 	set, err := Load(filepath.Join(t.TempDir(), "nothing.json"))
 	if err != nil {
@@ -134,9 +132,8 @@ func TestAMissingCacheIsNotAnError(t *testing.T) {
 }
 
 func TestApplyWritesACatalogEntryForTheSource(t *testing.T) {
-	// Provider output becomes a catalog, because a catalog is already the thing
-	// that says what a relation really contains — so column injection, stale
-	// removal, ordering and struct expansion all keep working unchanged.
+	// Provider output becomes a catalog, so column injection, stale removal,
+	// ordering and struct expansion all keep working unchanged.
 	p := &dbt.Project{Name: "shop", Manifest: &dbt.Manifest{
 		Nodes: map[string]*dbt.Node{}, Sources: map[string]*dbt.Node{},
 	}}
@@ -169,8 +166,7 @@ func TestApplyWritesACatalogEntryForTheSource(t *testing.T) {
 	if len(entry.Columns) != 2 || entry.Columns["id"].Type != "INT64" {
 		t.Fatalf("catalog entry = %+v", entry.Columns)
 	}
-	// The column now exists in the manifest too, so inheritance downstream can
-	// see it at all.
+	// The column now exists in the manifest too, so inheritance can see it.
 	if c := n.Column("id", true); c == nil || c.Description != "The key." {
 		t.Fatalf("manifest column = %+v", c)
 	}

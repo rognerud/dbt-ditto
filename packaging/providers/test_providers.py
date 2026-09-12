@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for the source providers.
-
-Neither warehouse can be reached from a test run, and neither needs to be: what
-is worth checking is the part that is easy to get wrong and cheap to check —
-the contract, profiles.yml resolution, and the type rendering that has to agree
-with what each dbt adapter writes into catalog.json.
-
-Run with `python packaging/providers/test_providers.py`. No pytest, no
-dependencies, because a test that needs its own install is a test that does not
-run in the hook that matters.
-"""
+"""Offline tests for the source providers."""
 
 from __future__ import annotations
 

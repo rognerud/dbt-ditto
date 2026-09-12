@@ -11,8 +11,7 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/runner"
 )
 
-// markDefinitive declares a column settled, in the manifest and in the YAML the
-// manifest was parsed from.
+// markDefinitive declares a column settled, in the manifest and the YAML.
 func markDefinitive(t *testing.T, s *stage, nodeID, file, column, description string) {
 	t.Helper()
 	c := s.col(t, nodeID, column)
@@ -32,13 +31,11 @@ func markDefinitive(t *testing.T, s *stage, nodeID, file, column, description st
 			"        meta:\n          "+inherit.DefinitiveKey+": true\n", 1)
 }
 
-// A definitive declaration is a decision, so it travels in every direction: to
-// the models below it, to the seed above it, and into the other projects in the
-// run. Ordinary inheritance only ever goes downhill.
+// A decision travels in every direction: to the models below, the seed above,
+// and into the other projects in the run.
 func TestDefinitiveTravelsUpDownAndAcross(t *testing.T) {
 	s := newStage()
-	// Declared on the model in the middle: the seed above documents `id`
-	// differently, and `raw_alt` differently again.
+	// Declared in the middle: the seed above and `raw_alt` both differ.
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "The settled wording for the identifier.")
 	// A second project, with its own column of the same name.
 	s.nodes["model.demo.other"] = modelNode("other", "models/_other.yml", nil,
@@ -58,8 +55,7 @@ func TestDefinitiveTravelsUpDownAndAcross(t *testing.T) {
 		"the settled wording did not replace the local one")
 }
 
-// The column carrying the marker is the decision. Nothing overwrites it — not
-// an ancestor, not `force`.
+// The column carrying the marker is the decision: nothing overwrites it.
 func TestDefinitiveColumnIsLocked(t *testing.T) {
 	s := newStage()
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "Locked, and not up for discussion.")
@@ -74,8 +70,7 @@ func TestDefinitiveColumnIsLocked(t *testing.T) {
 	lacks(t, body, "Identifier of the row.", "the upstream wording was written over the decision")
 }
 
-// Whoever reads the file afterwards needs to see where the wording came from,
-// exactly as they would for an ordinary inherited description.
+// Whoever reads the file needs to see where the wording came from.
 func TestDefinitiveIsRecordedAsTheProgenitor(t *testing.T) {
 	s := newStage()
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "The settled wording.")
@@ -89,8 +84,8 @@ func TestDefinitiveIsRecordedAsTheProgenitor(t *testing.T) {
 		"the settled wording did not record where the decision was made")
 }
 
-// The marker names one column as the decision. Copying it downstream would make
-// every column below claim to be the decision as well.
+// Copying the marker downstream would make every column below claim to be the
+// decision as well.
 func TestDefinitiveMarkerIsNotInherited(t *testing.T) {
 	s := newStage()
 	// The marker is on the seed's column, and the model below only inherits.
@@ -106,8 +101,7 @@ func TestDefinitiveMarkerIsNotInherited(t *testing.T) {
 	lacks(t, body, inherit.DefinitiveKey, "the marker was copied to a column that did not declare it")
 }
 
-// A disagreement between two declarations is not something to resolve by rule:
-// the run stops and says which ones disagree.
+// A disagreement between declarations is not resolvable by rule: the run stops.
 func TestConflictingDefinitivesAreAnError(t *testing.T) {
 	s := newStage()
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "One decision.")
@@ -156,8 +150,7 @@ func TestIdenticalDefinitivesAgree(t *testing.T) {
 	}
 }
 
-// With case-sensitive matching, `ID` and `id` are different columns, so two
-// declarations are two decisions about two things.
+// Case-sensitively, `ID` and `id` are two columns and so two decisions.
 func TestDefinitivesInDifferentCasesDoNotConflictWhenMatchingIsCaseSensitive(t *testing.T) {
 	s := newStage()
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "About the upper-cased one.")
@@ -175,8 +168,7 @@ func TestDefinitivesInDifferentCasesDoNotConflictWhenMatchingIsCaseSensitive(t *
 	}
 }
 
-// A declaration in a manifest that arrived through dbt-loom cannot be reviewed
-// or edited from here, so it does not get to rewrite local documentation.
+// A declaration in a dbt-loom manifest cannot be reviewed or edited from here.
 func TestDefinitiveInAManifestOnlyProjectIsIgnored(t *testing.T) {
 	root := t.TempDir()
 	down := newStage()
@@ -216,8 +208,7 @@ func TestDefinitiveInAManifestOnlyProjectIsIgnored(t *testing.T) {
 		"the local seed's documentation was replaced by a manifest-only declaration")
 }
 
-// A settled column has nothing arbitrary left about it, so the disagreement
-// that prompted the declaration stops being reported.
+// A settled column has nothing arbitrary left, so the warning stops.
 func TestDefinitiveSilencesTheAmbiguityWarning(t *testing.T) {
 	s := newStage()
 	markDefinitive(t, s, "model.demo.stg", "models/_stg.yml", "ID", "Settled.")

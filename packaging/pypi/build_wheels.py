@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Build PyPI wheels that carry the dbt-ditto binary.
-
-Why wheels at all, for a Go program: the people who run dbt-osmosis and dbt-loom
-already have a Python environment with those two in it. Shipping wheels turns
-adoption into a dependency edit rather than "install a second toolchain".
-
-How it works: a wheel may contain a `<name>-<version>.data/scripts/` directory,
-and installers copy anything in it straight into the environment's `bin/` and
-mark it executable. So the wheel holds the binary and nothing else -- no Python
-shim, no subprocess, no interpreter startup on the hot path. `dbt-ditto` simply
-appears on PATH.
-
-One wheel is produced per platform. A wheel is a zip with a prescribed layout,
-so this script uses only the standard library: it has to run before anything is
-installed, and a build tool that needs its own dependencies resolved first is a
-bootstrapping problem nobody needs.
-
-    python3 packaging/pypi/build_wheels.py --version 0.1.0
-    python3 packaging/pypi/build_wheels.py --version 0.1.0 --targets darwin/arm64
-"""
+"""Build PyPI wheels that carry the dbt-ditto binary."""
 
 from __future__ import annotations
 
@@ -41,9 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 DISTRIBUTION = "dbt-ditto"
-# PEP 427 escapes the distribution name wherever it appears in the archive: runs
-# of anything but letters, digits and `.` become a single underscore. Installers
-# match on the escaped form, so a hyphen here would produce wheels pip refuses.
+# PEP 427 escapes the distribution name wherever it appears in the archive: runs of
+# anything but letters, digits and `.` become a single underscore.
 ESCAPED = re.sub(r"[^\w\d.]+", "_", DISTRIBUTION)
 SUMMARY = "dbt documentation inheritance across projects: dbt-osmosis' YAML management, extended across dbt-loom project boundaries, in one static binary."
 HOMEPAGE = "https://github.com/rognerud/dbt-ditto"
@@ -105,12 +85,7 @@ MODE_REGULAR = 0o644
 
 
 def normalise_version(raw: str) -> str:
-    """Turn a git description into something PEP 440 accepts.
-
-    `git describe` produces `v0.1.0`, or `v0.1.0-4-gabc1234` when the tag is not
-    the current commit. PyPI rejects both spellings, so they become `0.1.0` and
-    `0.1.0.post4+gabc1234`.
-    """
+    """Turn a git description into something PEP 440 accepts."""
     version = raw.strip()
     version = version.removeprefix("v")
     version = version.removesuffix("-dirty")
@@ -256,13 +231,8 @@ def build_wheel(target: Target, version: str, commit: str, out_dir: Path, work: 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, data, mode in entries:
             info = zipfile.ZipInfo(name, date_time=ZIP_TIMESTAMP)
-            # The whole Unix st_mode, file-type bits included, goes in the top
-            # half of external_attr. The regular-file bit is not decoration:
-            # pip decides whether to make a script executable with
-            # `stat.S_ISREG(external_attr >> 16) and mode & 0o111`, so a mode
-            # without S_IFREG installs the binary as rw-r--r-- and every pip
-            # user gets "permission denied". uv only checks the execute bits and
-            # installs it fine either way, which is a good way not to notice.
+            # The whole Unix st_mode, file-type bits included, goes in the top half of
+            # external_attr.
             info.external_attr = (mode | stat.S_IFREG) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             zf.writestr(info, data)

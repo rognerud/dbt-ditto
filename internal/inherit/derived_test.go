@@ -8,8 +8,7 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// derivedOn enables cross-name matching, which is off by default because it
-// goes beyond what dbt-osmosis does.
+// derivedOn enables cross-name matching, off by default as beyond dbt-osmosis.
 func derivedOn(c *config.Config) {
 	on := true
 	c.Inheritance.Derived.Enabled = &on
@@ -38,8 +37,7 @@ func TestDerivedEnabledTurnsOnBothStrategies(t *testing.T) {
 	}
 }
 
-// A column that has been summed still means the same thing as the column it was
-// summed from, so it should inherit that column's documentation.
+// A summed column still means what the column it was summed from means.
 func TestAggregatedColumnInheritsFromItsSource(t *testing.T) {
 	up := seed("p", "raw", col("amount_cents", "Order gross value in minor units."))
 	down := node("p", "agg", []string{"seed.p.raw"}, col("total_amount_cents", ""))
@@ -70,8 +68,7 @@ func TestAggregateSuffixesAndBothEnds(t *testing.T) {
 	}
 }
 
-// Only whole words are stripped. `counterparty_id` must not be read as an
-// aggregate of `erparty_id`, and a wrong description is worse than none.
+// Only whole words are stripped: `counterparty_id` is not `erparty_id` summed.
 func TestAggregateStrippingOnlyTakesWholeWords(t *testing.T) {
 	up := seed("p", "raw", col("erparty_id", "Nonsense that must not be inherited."))
 	down := node("p", "stg", []string{"seed.p.raw"}, col("counterparty_id", ""))
@@ -82,8 +79,7 @@ func TestAggregateStrippingOnlyTakesWholeWords(t *testing.T) {
 	}
 }
 
-// Packing a column into a struct: the field keeps the meaning of the column it
-// was packed from.
+// Packing into a struct: the field keeps the meaning of the flat column.
 func TestStructFieldInheritsFromTheFlatColumn(t *testing.T) {
 	up := seed("p", "raw", col("first_name", "Customer given name."))
 	down := node("p", "packed", []string{"seed.p.raw"}, col("profile.first_name", ""))
@@ -134,8 +130,7 @@ func TestExactMatchBeatsDerivedMatch(t *testing.T) {
 	}
 }
 
-// Sources are inheritance roots like any other node, and derived matching has
-// to apply to them too.
+// Sources are inheritance roots too, so derived matching has to reach them.
 func TestDerivedMatchingWorksFromSources(t *testing.T) {
 	src := &dbt.Node{
 		UniqueID: "source.p.crm.raw_orders", Name: "raw_orders", ResourceType: "source",
@@ -158,8 +153,7 @@ func TestDerivedMatchingWorksFromSources(t *testing.T) {
 	}
 }
 
-// With derived matching off, none of this happens: that is what keeps the
-// dbt-osmosis parity claim true.
+// With derived matching off none of this happens, which is the parity claim.
 func TestDerivedMatchingDoesNothingWhenOff(t *testing.T) {
 	up := seed("p", "raw", col("amount_cents", "The amount."))
 	down := node("p", "agg", []string{"seed.p.raw"}, col("total_amount_cents", ""))

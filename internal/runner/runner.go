@@ -1,5 +1,4 @@
 // Package runner orchestrates a dbt-ditto run: load the projects, build the
-// cross-project graph, resolve inheritance, and write the schema YAML back.
 package runner
 
 import (
@@ -27,12 +26,9 @@ type Options struct {
 	Organize bool // may be forced off from the CLI
 	Verbose  bool
 
-	// RefreshSources runs the configured source providers and rewrites the
-	// cache. Without it a run reads the cache and spawns nothing, which is what
-	// lets `--check` work on a CI runner with no warehouse credentials.
+	// RefreshSources runs the configured source providers and rewrites the cache.
 	RefreshSources bool
-	// Target is the profiles.yml target providers should connect with, passed
-	// through so they authenticate the way dbt does for the same project.
+	// Target is the profiles.yml target providers should connect with.
 	Target string
 }
 
@@ -49,11 +45,10 @@ type Report struct {
 	FilesWritten []string
 	FilesDeleted []string
 	NodesScanned int
-	// Warnings are per-column notes the run produced: an unresolvable directive,
-	// or a column its parents document differently. They never fail the run.
+	// Warnings are per-column notes: an unresolvable directive, or a column its
+	// parents document differently. They never fail the run.
 	Warnings []inherit.Warning
-	// Notes are remarks about the run as a whole rather than about a column: a
-	// source provider that could not be reached, or what a refresh fetched.
+	// Notes are remarks about the run as a whole rather than about a column.
 	Notes []string
 }
 
@@ -75,8 +70,8 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	graph := inherit.BuildGraph(projects)
 
-	// Source documentation is folded in before resolution, so the rest of the
-	// pipeline cannot tell a provider's answer from a catalog dbt generated.
+	// Folded in before resolution, so nothing downstream can tell a provider's
+	// answer from a catalog dbt generated.
 	notes, err := applySources(cfg, resolved, graph, opts)
 	if err != nil {
 		return nil, err
@@ -84,9 +79,9 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	res := &inherit.Resolver{Graph: graph, Cfg: resolved}
 
-	// Collected before anything is resolved: two declarations that disagree are
-	// a question only a person can answer, and answering it halfway through a
-	// run would leave half the files written.
+	// Collected before anything is resolved: two declarations that disagree are a
+	// question only a person can answer, and asking halfway through would leave
+	// half the files written.
 	definitives, err := inherit.BuildDefinitives(graph, res.Fold)
 	if err != nil {
 		return nil, err
@@ -97,8 +92,8 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	rep := &Report{NodesScanned: len(targets), Notes: notes}
 	rep.Warnings = append(rep.Warnings, shadowedSourceWarnings(graph, targets)...)
 
-	// Work out which YAML file each node lives in now and which it should live
-	// in after organising, then load every file involved in one parallel pass.
+	// Work out which YAML file each node lives in now and which it should live in
+	// after organising, then load every file involved in one parallel pass.
 	type placement struct {
 		node *dbt.Node
 		from string // repo-relative, empty when undocumented
@@ -114,8 +109,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 			}
 		}
 		if to == "" {
-			// Undocumented and no path rule: fall back to a sibling file so the
-			// node still gets documentation.
+			// Undocumented and no path rule: fall back to a sibling file.
 			to = defaultSchemaPath(n)
 		}
 		placements = append(placements, placement{node: n, from: from, to: to})
@@ -147,9 +141,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		files.put(paths[i], loaded[i])
 	}
 
-	// Resolving inheritance is the expensive part and it only reads, so every
-	// node is resolved up front in parallel. Mutation has to stay sequential
-	// afterwards: several nodes can share a file, and a move touches two.
+	// Resolving is the expensive part and only reads, so it runs in parallel.
 	docs := make([]*inherit.NodeDoc, len(placements))
 	parallel(len(placements), func(i int) {
 		p := placements[i]
@@ -199,9 +191,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		}
 	}
 
-	// Save, and drop files that organising emptied out. Rendering YAML is by far
-	// the most expensive thing left, and files are independent of one another,
-	// so this runs in parallel too.
+	// Save, and drop files organising emptied out.
 	abs := files.paths()
 	type outcome struct {
 		rel     string
@@ -255,9 +245,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	return rep, nil
 }
 
-// parallel runs body for every index in [0, n), across one goroutine per CPU.
-// Each call must only touch its own index, which is what lets the results be
-// collected without any locking.
+// parallel runs body for every index in [0, n), one goroutine per CPU.
 func parallel(n int, body func(i int)) {
 	if n == 0 {
 		return
@@ -292,10 +280,8 @@ func parallel(n int, body func(i int)) {
 }
 
 // configBlockFor decides whether a node's column meta and tags belong inside a
-// `config:` block, from the dbt version that produced the node's manifest, as
-// dbt-osmosis' fusion_compat detection does. A manifest whose version cannot be
-// read is treated as old, which is the safe direction: writing meta under
-// `config:` on a dbt that does not read it there loses it silently.
+// `config:` block, from the dbt version that produced the manifest, as dbt-osmosis'
+// fusion_compat detection does.
 func configBlockFor(n *dbt.Node) bool {
 	if n.Manifest == nil {
 		return false
@@ -309,8 +295,7 @@ func loadProjects(cfg *config.Config) ([]*dbt.Project, error) {
 	errs := make([]error, len(cfg.Projects))
 	parallel(len(cfg.Projects), func(i int) {
 		ref := cfg.Projects[i]
-		// A manifest-only ref (a dbt-loom upstream) has no project directory to
-		// read dbt_project.yml from.
+		// A manifest-only ref has no project directory to read dbt_project.yml from.
 		if ref.Manifest != "" {
 			out[i], errs[i] = dbt.LoadManifestOnly(ref.Name, absTo(cfg.Dir, ref.Manifest))
 			if errs[i] != nil {
@@ -331,14 +316,8 @@ func loadProjects(cfg *config.Config) ([]*dbt.Project, error) {
 	return dropDuplicateManifests(out, cfg.Projects), nil
 }
 
-// dropDuplicateManifests removes a manifest-only project that names a project
-// already loaded from a checkout, or named twice.
-//
-// dbt-loom's config lists upstreams that may also be configured here directly,
-// and nothing makes the two lists agree on spelling. Comparing the project name
-// each manifest reports compares what was actually loaded, rather than two
-// strings from two files. The checkout wins: it has dbt_project.yml, a catalog,
-// and YAML that can be written.
+// dropDuplicateManifests removes a manifest-only project naming a project already
+// loaded from a checkout, or named twice.
 func dropDuplicateManifests(projects []*dbt.Project, refs []config.ProjectRef) []*dbt.Project {
 	fromCheckout := make(map[string]bool, len(projects))
 	for i, p := range projects {
@@ -359,7 +338,6 @@ func dropDuplicateManifests(projects []*dbt.Project, refs []config.ProjectRef) [
 }
 
 // selectNodes returns the writable, documentable nodes matching the selector.
-// Nodes from installed packages are skipped: they belong to another repo.
 func selectNodes(projects []*dbt.Project, selectors []string) []*dbt.Node {
 	var out []*dbt.Node
 	for _, p := range projects {
@@ -378,11 +356,8 @@ func selectNodes(projects []*dbt.Project, selectors []string) []*dbt.Node {
 			}
 		}
 	}
-	// Entries are written in manifest order. That is the order dbt itself
-	// records nodes in and therefore the order dbt-osmosis lays out a schema
-	// file, so two models that end up sharing a file land in the same order
-	// here as there. Projects keep their configured order; the unique_id is
-	// only a tie-break for nodes from different manifests.
+	// Entries are written in manifest order, which is the order dbt records nodes in and
+	// therefore the order dbt-osmosis lays out a schema file.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Manifest != out[j].Manifest {
 			return out[i].UniqueID < out[j].UniqueID
@@ -393,7 +368,6 @@ func selectNodes(projects []*dbt.Project, selectors []string) []*dbt.Node {
 }
 
 // matches applies the `--select` filters: a bare name, `tag:x`, `path:x` or a
-// `*` glob against the node name or its fqn path.
 func matches(n *dbt.Node, selectors []string) bool {
 	if len(selectors) == 0 {
 		return true
@@ -516,8 +490,8 @@ func removeEntry(f *yamlfile.File, n *dbt.Node) {
 	f.RemoveEntry(section(n), n.Name)
 }
 
-// carryOver copies an entry verbatim into the destination file, so a move keeps
-// tests, comments and any keys dbt-ditto does not manage.
+// carryOver copies an entry verbatim, so a move keeps tests, comments and any
+// keys dbt-ditto does not manage.
 func carryOver(dst *yamlfile.File, n *dbt.Node, entry *yaml.Node) {
 	target := ensureEntry(dst, n)
 	for i := 0; i+1 < len(entry.Content); i += 2 {

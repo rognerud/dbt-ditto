@@ -12,8 +12,7 @@ import (
 )
 
 // The fixture contains a real disagreement: stg_orders_enriched reads both a
-// seed and a CRM source, and the two document `order_id` and `status`
-// differently. Which one wins is decided by unique_id order, so the run says so.
+// seed and a CRM source, which document `order_id` and `status` differently.
 func TestAmbiguousColumnsInTheFixtureAreReported(t *testing.T) {
 	work := copyFixture(t)
 
@@ -50,8 +49,7 @@ func TestAmbiguousColumnsInTheFixtureAreReported(t *testing.T) {
 }
 
 // A warning scrolls away; the annotation stays beside the description it
-// qualifies. `ambiguity_meta` writes the dissenting ancestors into the column's
-// meta, and a second run leaves the same annotation rather than churning it.
+// qualifies, and a second run leaves it rather than churning it.
 func TestAmbiguityMetaAnnotatesTheColumn(t *testing.T) {
 	work := copyFixture(t)
 	cfg := fixtureConfig(work)
@@ -83,11 +81,8 @@ func TestAmbiguityMetaAnnotatesTheColumn(t *testing.T) {
 	}
 }
 
-// Turning the annotation off has to take the annotation with it: a key left in
-// the file would keep claiming a disagreement nobody is being told about.
-// (Clearing it for a column that stopped inheriting is covered at the resolver
-// level, in inherit/ambiguity_test.go, because the description a column counts
-// as "its own" comes from the manifest rather than from the file on disk.)
+// Turning the annotation off has to take the annotation with it: a key left in the file
+// would keep claiming a disagreement nobody is being told about.
 func TestAmbiguityMetaIsRemovedWhenTurnedOff(t *testing.T) {
 	work := copyFixture(t)
 	cfg := fixtureConfig(work)

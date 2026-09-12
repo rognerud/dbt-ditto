@@ -27,20 +27,13 @@ export DBT_DITTO_DB="${ROOT}/testdata/warehouse.duckdb"
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 mkdir -p "${TMPDIR}"
 
-# dbt-osmosis asks the adapter for column types, so the fixture has to exist as
-# real tables in DuckDB. The warehouse is gitignored, so on a clean checkout
-# DuckDB creates an empty database instead of failing, dbt-osmosis finds no
-# columns and writes bare `- name: <model>` scaffolding, and the diff reads as
-# though dbt-ditto invented every column.
+# dbt-osmosis asks the adapter for column types, so the fixture has to exist as real
+# tables in DuckDB.
 if [[ ! -f "${DBT_DITTO_DB}" ]]; then
   echo "==> building the fixture warehouse"
   mkdir -p "${ROOT}/.gocache"
 
-  # Only the warehouse is wanted. build-fixture.sh also rewrites the committed
-  # target/manifest.json, which must not survive: dbt does not order manifest
-  # nodes deterministically, and selectNodes lays models out in manifest order,
-  # so that order is visible in the bytes wherever several share a schema file.
-  # The committed manifest is the one dbt-osmosis was recorded against.
+  # Only the warehouse is wanted.
   SAVED="$(mktemp -d "${TMPDIR%/}/parity-artifacts.XXXXXX")"
   for project in platform analytics; do
     cp -R "${ROOT}/testdata/projects/${project}/target" "${SAVED}/${project}"
@@ -72,9 +65,8 @@ echo "==> dbt-osmosis: platform"
     >"${WORK}/osmosis-platform.log" 2>&1
 ) || { echo "dbt-osmosis failed; see ${WORK}/osmosis-platform.log" >&2; exit 1; }
 
-# dbt-osmosis cannot run against the cross-project (dbt-loom) project at all: the
-# two plugins are incompatible. Record the failure as evidence rather than
-# pretending the comparison is possible.
+# dbt-osmosis cannot run against the cross-project (dbt-loom) project at all: the two
+# plugins are incompatible.
 echo "==> dbt-osmosis: analytics (expected to fail: dbt-loom incompatibility)"
 set +e
 (
@@ -114,11 +106,9 @@ GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT
 echo
 echo "==> diff (platform schema YAML)"
 # Both trees are copied and canonicalised first, so the diff does not depend on
-# manifest node order: dbt-osmosis re-parses the project on every run while
-# dbt-ditto reads the committed manifest, and dbt promises no order, so that
-# order differs by machine. Entry order within a file is proved separately, by
-# the Go tests against the recorded manifest. The copies keep the
-# uncanonicalised output for the golden refresh below.
+# manifest node order: dbt-osmosis re-parses the project on every run while dbt-ditto
+# reads the committed manifest, and dbt promises no order, so that order differs by
+# machine.
 rm -rf "${WORK}/canon"
 mkdir -p "${WORK}/canon"
 cp -R "${WORK}/osmosis/platform" "${WORK}/canon/osmosis"
@@ -151,8 +141,7 @@ mkdir -p "${GOLDEN}"
 cp "${WORK}/osmosis-analytics.log" "${GOLDEN}/../osmosis-analytics-failure.log"
 
 # The cross-project project has no dbt-osmosis reference to compare against, so
-# dbt-ditto' own output is recorded instead. Regenerate it with default
-# settings rather than the osmosis comment compatibility mode.
+# dbt-ditto' own output is recorded instead.
 LOOM_GOLDEN="${ROOT}/testdata/golden/dbt-ditto"
 echo "==> refreshing ${LOOM_GOLDEN}"
 rm -rf "${WORK}/default" "${LOOM_GOLDEN}"

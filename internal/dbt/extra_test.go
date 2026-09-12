@@ -14,8 +14,8 @@ const columnWithPolicyTags = `{
   "quote": true
 }`
 
-// Nothing is captured by default: the fast path is the one every run takes, and
-// a map per column to hold fields nobody asked to propagate is not free.
+// Nothing is captured by default: a map per column for fields nobody asked to
+// propagate is not free.
 func TestExtraColumnKeysDefaultsToCapturingNothing(t *testing.T) {
 	var c Column
 	if err := json.Unmarshal([]byte(columnWithPolicyTags), &c); err != nil {
@@ -47,9 +47,8 @@ func TestExtraColumnKeysCapturesOnlyWhatItNames(t *testing.T) {
 	}
 }
 
-// A named key the column does not have must not turn into a present-but-empty
-// entry: propagation later has to tell "no value" from "an empty value", or it
-// writes a blank policy tag over a real one.
+// A named key the column does not have must not become a present-but-empty
+// entry: propagation has to tell "no value" from "an empty value".
 func TestAbsentAndNullExtraKeysAreNotRecorded(t *testing.T) {
 	defer withExtraKeys(t, "policy_tags", "missing")()
 

@@ -25,20 +25,21 @@ type settingCase struct {
 	// claim is what the documentation says this setting does, in one line.
 	claim string
 	// build lays out the project and returns the config the `off` run uses.
-	// Cases that need more than the shared stage replace it.
 	build func(t *testing.T) (dir string, cfg *config.Config)
 	// set changes the setting under test, and nothing else.
 	set func(t *testing.T, c *config.Config, dir string)
-	off func(t *testing.T, s snapshot)
-	on  func(t *testing.T, s snapshot)
+	off check
+	on  check
 
 	// refresh runs the source providers, which is the only way a provider is
 	// ever spawned: an ordinary run reads the cache and connects to nothing.
 	refresh bool
-	// fail marks a setting whose whole claim is that the run stops. The `on`
-	// run is then required to return an error rather than a snapshot.
+	// fail marks a setting whose whole claim is that the run stops.
 	fail bool
 }
+
+// check is one half of a case: an assertion about a finished run.
+type check func(t *testing.T, s snapshot)
 
 // stageBuild is the default: the shared stage, tweaked by fn.
 func stageBuild(fn func(t *testing.T, s *stage)) func(*testing.T) (string, *config.Config) {
@@ -80,6 +81,39 @@ func lacks(t *testing.T, body, unwanted, why string) {
 
 func stgFile(t *testing.T, s snapshot) string { return s.file(t, "models/_stg.yml") }
 
+// has and lacksIn are the two assertions nearly every case makes, about the
+// staging model's schema file; inFile and notInFile name another file, and
+// inCol and notInCol narrow to a single column entry so an assertion cannot
+// accidentally match text belonging to its neighbour.
+func has(want, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); contains(t, stgFile(t, s), want, why) }
+}
+
+func lacksIn(unwanted, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); lacks(t, stgFile(t, s), unwanted, why) }
+}
+
+func inFile(path, want, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); contains(t, s.file(t, path), want, why) }
+}
+
+func notInFile(path, unwanted, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); lacks(t, s.file(t, path), unwanted, why) }
+}
+
+func inCol(column, want, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); contains(t, colBlock(t, s, column), want, why) }
+}
+
+func notInCol(column, unwanted, why string) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); lacks(t, colBlock(t, s, column), unwanted, why) }
+}
+
+// both runs two checks, for the cases that assert more than one thing.
+func both(a, b check) check {
+	return func(t *testing.T, s snapshot) { t.Helper(); a(t, s); b(t, s) }
+}
+
 func settingCases() []settingCase {
 	cases := []settingCase{
 		// --- projects ------------------------------------------------------
@@ -97,15 +131,11 @@ func settingCases() []settingCase {
 			set: func(t *testing.T, c *config.Config, dir string) {
 				c.Projects[0].Path = filepath.Join(filepath.Dir(dir), "b")
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Identifier of the row.", "the configured project was not the one read")
-			},
-			on: func(t *testing.T, s snapshot) {
-				// The other project was documented instead; this one was left
-				// exactly as it was written out.
-				lacks(t, stgFile(t, s), "Identifier of the row.",
-					"the project the path no longer points at was still written")
-			},
+			off: has("Identifier of the row.", "the configured project was not the one read"),
+			// The other project was documented instead; this one was left exactly
+			// as it was written out.
+			on: lacksIn("Identifier of the row.",
+				"the project the path no longer points at was still written"),
 		},
 		{
 			key:   "projects[].target",
@@ -121,13 +151,9 @@ func settingCases() []settingCase {
 				return dir, stageConfig(dir)
 			},
 			set: func(t *testing.T, c *config.Config, dir string) { c.Projects[0].Target = "ci_artifacts" },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Identifier of the row.", "the default target/ was not read")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Documented in the artifacts CI downloaded.",
-					"the configured target directory was not read")
-			},
+			off: has("Identifier of the row.", "the default target/ was not read"),
+			on: has("Documented in the artifacts CI downloaded.",
+				"the configured target directory was not read"),
 		},
 		{
 			key:   "projects[].manifest",
@@ -143,27 +169,8 @@ func settingCases() []settingCase {
 					"nodes": []string{"seed.upstream.raw"},
 				}
 				dir := down.write(t, filepath.Join(root, "downstream"))
-
-				// The upstream, as a bare manifest.
-				up := newStage()
-				up.name = "upstream"
-				upDir := filepath.Join(root, "upstream")
-				if err := os.MkdirAll(upDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				up.nodes = map[string]any{
-					"seed.upstream.raw": map[string]any{
-						"unique_id": "seed.upstream.raw", "name": "raw",
-						"resource_type": "seed", "package_name": "upstream",
-						"columns": columnMap([]map[string]any{
-							column("ID", "Documented in a manifest nobody checked out."),
-						}),
-						"depends_on": map[string]any{"nodes": []string{}},
-					},
-				}
-				up.sources = map[string]any{}
-				up.writeArtifacts(t, upDir)
-
+				upstreamManifest(t, filepath.Join(root, "upstream"),
+					"Documented in a manifest nobody checked out.")
 				return dir, &config.Config{Dir: root, Projects: []config.ProjectRef{{Path: dir}}}
 			},
 			set: func(t *testing.T, c *config.Config, dir string) {
@@ -172,14 +179,10 @@ func settingCases() []settingCase {
 					Upstream: true,
 				})
 			},
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Documented in a manifest nobody checked out.",
-					"documentation appeared without the manifest being configured")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Documented in a manifest nobody checked out.",
-					"the manifest-only project did not donate its documentation")
-			},
+			off: lacksIn("Documented in a manifest nobody checked out.",
+				"documentation appeared without the manifest being configured"),
+			on: has("Documented in a manifest nobody checked out.",
+				"the manifest-only project did not donate its documentation"),
 		},
 		{
 			key:   "projects[].upstream",
@@ -190,15 +193,13 @@ func settingCases() []settingCase {
 				return a, &config.Config{Dir: root, Projects: []config.ProjectRef{{Path: a}}}
 			},
 			set: func(t *testing.T, c *config.Config, dir string) { c.Projects[0].Upstream = true },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Identifier of the row.", "a writable project was not written")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Identifier of the row.", "an upstream project was written to")
-				if s.scanned != 0 {
-					t.Errorf("%d nodes scanned, want none: an upstream project has nothing to write", s.scanned)
-				}
-			},
+			off: has("Identifier of the row.", "a writable project was not written"),
+			on: both(lacksIn("Identifier of the row.", "an upstream project was written to"),
+				func(t *testing.T, s snapshot) {
+					if s.scanned != 0 {
+						t.Errorf("%d nodes scanned, want none: an upstream project has nothing to write", s.scanned)
+					}
+				}),
 		},
 		{
 			key:   "loom",
@@ -214,54 +215,20 @@ func settingCases() []settingCase {
 				down.raw["dbt_loom.config.yml"] = "manifests:\n  - name: upstream\n    type: file\n" +
 					"    config:\n      path: ../upstream/manifest.json\n"
 				dir := down.write(t, filepath.Join(root, "downstream"))
-
-				up := newStage()
-				up.name = "upstream"
-				up.nodes = map[string]any{
-					"seed.upstream.raw": map[string]any{
-						"unique_id": "seed.upstream.raw", "name": "raw",
-						"resource_type": "seed", "package_name": "upstream",
-						"columns": columnMap([]map[string]any{
-							column("ID", "Documented in the manifest dbt-loom points at."),
-						}),
-						"depends_on": map[string]any{"nodes": []string{}},
-					},
-				}
-				up.sources = map[string]any{}
-				upDir := filepath.Join(root, "upstream")
-				if err := os.MkdirAll(upDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				up.writeArtifacts(t, upDir)
+				upstreamManifest(t, filepath.Join(root, "upstream"),
+					"Documented in the manifest dbt-loom points at.")
 
 				// Loaded from a real config file, because reading dbt-loom's
 				// config is part of loading and not something a caller does.
-				writeFile(t, filepath.Join(root, "dbt_ditto.yml"),
-					"projects:\n  - path: downstream\n")
-				cfg, err := config.Load(filepath.Join(root, "dbt_ditto.yml"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				return dir, cfg
+				return dir, loadConfig(t, root, "projects:\n  - path: downstream\n")
 			},
 			set: func(t *testing.T, c *config.Config, dir string) {
-				root := filepath.Dir(dir)
-				writeFile(t, filepath.Join(root, "dbt_ditto.yml"),
-					"loom: false\nprojects:\n  - path: downstream\n")
-				reloaded, err := config.Load(filepath.Join(root, "dbt_ditto.yml"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				*c = *reloaded
+				*c = *loadConfig(t, filepath.Dir(dir), "loom: false\nprojects:\n  - path: downstream\n")
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Documented in the manifest dbt-loom points at.",
-					"the dbt-loom config was not read")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Documented in the manifest dbt-loom points at.",
-					"the dbt-loom config was read with loom: false")
-			},
+			off: has("Documented in the manifest dbt-loom points at.",
+				"the dbt-loom config was not read"),
+			on: lacksIn("Documented in the manifest dbt-loom points at.",
+				"the dbt-loom config was read with loom: false"),
 		},
 
 		// --- inheritance ---------------------------------------------------
@@ -270,13 +237,9 @@ func settingCases() []settingCase {
 			claim: "inherit column documentation at all",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Columns = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Identifier of the row.", "columns did not inherit")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Identifier of the row.",
-					"a description was inherited with inheritance.columns off")
-			},
+			off:   has("Identifier of the row.", "columns did not inherit"),
+			on: lacksIn("Identifier of the row.",
+				"a description was inherited with inheritance.columns off"),
 		},
 		{
 			key:   "inheritance.node_description",
@@ -285,53 +248,34 @@ func settingCases() []settingCase {
 				s.node(t, "seed.demo.raw")["description"] = "What the table as a whole holds."
 			}),
 			set: func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.NodeDescription = ptrTo(true) },
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "What the table as a whole holds.",
-					"the node description was inherited by default")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "What the table as a whole holds.",
-					"the node description was not inherited")
-			},
+			off: lacksIn("What the table as a whole holds.",
+				"the node description was inherited by default"),
+			on: has("What the table as a whole holds.", "the node description was not inherited"),
 		},
 		{
 			key:   "inheritance.meta",
 			claim: "merge a column's meta down the DAG",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Meta = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "owner: platform", "meta did not inherit")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "owner: platform", "meta inherited with inheritance.meta off")
-			},
+			off:   has("owner: platform", "meta did not inherit"),
+			on:    lacksIn("owner: platform", "meta inherited with inheritance.meta off"),
 		},
 		{
 			key:   "inheritance.tags",
 			claim: "merge a column's tags down the DAG",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Tags = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "- core", "tags did not inherit")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "- core", "tags inherited with inheritance.tags off")
-			},
+			off:   has("- core", "tags did not inherit"),
+			on:    lacksIn("- core", "tags inherited with inheritance.tags off"),
 		},
 		{
 			key:   "inheritance.case_insensitive",
 			claim: "match a column to an upstream one spelled in another case",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.CaseInsensitive = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				// The model's column is `ID`, the seed documents `id`.
-				contains(t, stgFile(t, s), "Identifier of the row.",
-					"ID did not match the upstream id")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Identifier of the row.",
-					"ID matched id with case-insensitive matching off")
-			},
+			// The model's column is `ID`, the seed documents `id`.
+			off: has("Identifier of the row.", "ID did not match the upstream id"),
+			on:  lacksIn("Identifier of the row.", "ID matched id with case-insensitive matching off"),
 		},
 		{
 			key:   "inheritance.force",
@@ -345,15 +289,9 @@ func settingCases() []settingCase {
 					"      - name: ID\n        description: The local wording.\n", 1)
 			}),
 			set: func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Force = ptrTo(true) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "The local wording.",
-					"a hand-written description was replaced without force")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Identifier of the row.",
-					"force did not overwrite the local description")
-				lacks(t, stgFile(t, s), "The local wording.", "the local description survived force")
-			},
+			off: has("The local wording.", "a hand-written description was replaced without force"),
+			on: both(has("Identifier of the row.", "force did not overwrite the local description"),
+				lacksIn("The local wording.", "the local description survived force")),
 		},
 		{
 			key:   "inheritance.placeholders",
@@ -364,12 +302,8 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.Placeholders = []string{"TBC"}
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "TBC", "an ordinary description was dropped")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "TBC", "a configured placeholder was still inherited")
-			},
+			off: has("TBC", "an ordinary description was dropped"),
+			on:  lacksIn("TBC", "a configured placeholder was still inherited"),
 		},
 		{
 			key:   "inheritance.skip_meta_keys",
@@ -378,26 +312,17 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.SkipMetaKeys = []string{"owner"}
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "owner: platform", "meta did not inherit")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "owner: platform", "a skipped meta key was inherited")
-				contains(t, stgFile(t, s), "pii: true", "skipping one key dropped the others too")
-			},
+			off: has("owner: platform", "meta did not inherit"),
+			on: both(lacksIn("owner: platform", "a skipped meta key was inherited"),
+				has("pii: true", "skipping one key dropped the others too")),
 		},
 		{
 			key:   "inheritance.progenitor",
 			claim: "record which node an inherited description came from",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Progenitor = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "osmosis_progenitor: seed.demo.raw",
-					"no progenitor was recorded")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "osmosis_progenitor", "a progenitor was recorded anyway")
-			},
+			off:   has("osmosis_progenitor: seed.demo.raw", "no progenitor was recorded"),
+			on:    lacksIn("osmosis_progenitor", "a progenitor was recorded anyway"),
 		},
 		{
 			key:   "inheritance.progenitor_key",
@@ -406,51 +331,27 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.ProgenitorKey = ptrTo("came_from")
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "osmosis_progenitor:", "the default key was not used")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "came_from: seed.demo.raw", "the configured key was not used")
-				lacks(t, stgFile(t, s), "osmosis_progenitor", "the default key was written as well")
-			},
+			off: has("osmosis_progenitor:", "the default key was not used"),
+			on: both(has("came_from: seed.demo.raw", "the configured key was not used"),
+				lacksIn("osmosis_progenitor", "the default key was written as well")),
 		},
 		{
 			key:   "inheritance.directives",
 			claim: `honour a description written as "Inherited: node.column"`,
-			build: stageBuild(func(t *testing.T, s *stage) {
-				s.col(t, "model.demo.stg", "ID")["description"] = "Inherited: raw.first_name"
-				s.files["models/_stg.yml"] = strings.Replace(s.files["models/_stg.yml"],
-					"      - name: ID\n", "      - name: ID\n        description: \"Inherited: raw.first_name\"\n", 1)
-			}),
-			set: func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Directives = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Given name, as the customer typed it.",
-					"the directive was not followed")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Inherited: raw.first_name",
-					"the directive was followed with directives off")
-			},
+			build: stageBuild(withDirective("Inherited: raw.first_name")),
+			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Directives = ptrTo(false) },
+			off:   has("Given name, as the customer typed it.", "the directive was not followed"),
+			on:    has("Inherited: raw.first_name", "the directive was followed with directives off"),
 		},
 		{
 			key:   "inheritance.directive_prefix",
 			claim: "the marker that turns a description into a pointer",
-			build: stageBuild(func(t *testing.T, s *stage) {
-				s.col(t, "model.demo.stg", "ID")["description"] = "See: raw.first_name"
-				s.files["models/_stg.yml"] = strings.Replace(s.files["models/_stg.yml"],
-					"      - name: ID\n", "      - name: ID\n        description: \"See: raw.first_name\"\n", 1)
-			}),
+			build: stageBuild(withDirective("See: raw.first_name")),
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.DirectivePrefix = ptrTo("See:")
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "See: raw.first_name",
-					"a description was treated as a directive by the wrong marker")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Given name, as the customer typed it.",
-					"the configured marker was not recognised")
-			},
+			off: has("See: raw.first_name", "a description was treated as a directive by the wrong marker"),
+			on:  has("Given name, as the customer typed it.", "the configured marker was not recognised"),
 		},
 		{
 			key:   "inheritance.warn_ambiguous",
@@ -473,13 +374,9 @@ func settingCases() []settingCase {
 			claim: "record that disagreement in the column's meta",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.AmbiguityMeta = ptrTo(true) },
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), config.DefaultAmbiguityKey, "the annotation was written by default")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), config.DefaultAmbiguityKey, "no annotation was written")
-				contains(t, stgFile(t, s), "- seed.demo.raw_alt", "the annotation did not name the dissenter")
-			},
+			off:   lacksIn(config.DefaultAmbiguityKey, "the annotation was written by default"),
+			on: both(has(config.DefaultAmbiguityKey, "no annotation was written"),
+				has("- seed.demo.raw_alt", "the annotation did not name the dissenter")),
 		},
 		{
 			key:   "inheritance.ambiguity_key",
@@ -490,57 +387,38 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.AmbiguityKey = ptrTo("disputed_by")
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), config.DefaultAmbiguityKey+":", "the default key was not used")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "disputed_by:", "the configured key was not used")
-				lacks(t, stgFile(t, s), config.DefaultAmbiguityKey, "the default key was written as well")
-			},
+			off: has(config.DefaultAmbiguityKey+":", "the default key was not used"),
+			on: both(has("disputed_by:", "the configured key was not used"),
+				lacksIn(config.DefaultAmbiguityKey, "the default key was written as well")),
 		},
 		{
 			key:   "inheritance.derived.enabled",
 			claim: "match a column to an upstream one it no longer shares a name with",
 			build: stageBuild(withDerivedColumns),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Derived.Enabled = ptrTo(true) },
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Amount, in cents.\n        name: total_amount_cents",
-					"derived matching ran by default")
-				lacks(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"an aggregated column inherited by default")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"the aggregated column did not inherit")
-			},
+			off: both(
+				lacksIn("Amount, in cents.\n        name: total_amount_cents", "derived matching ran by default"),
+				notInCol("total_amount_cents", "Amount, in cents.", "an aggregated column inherited by default")),
+			on: inCol("total_amount_cents", "Amount, in cents.", "the aggregated column did not inherit"),
 		},
 		{
 			key:   "inheritance.derived.structs",
 			claim: "match a struct field to the flat column it was packed from",
 			build: stageBuildCfg(withDerivedColumns, enableDerived),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Derived.Structs = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, derivedBlock(t, s, "profile.first_name"), "Given name, as the customer typed it.",
-					"the struct field did not inherit from the flat column")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, derivedBlock(t, s, "profile.first_name"), "Given name, as the customer typed it.",
-					"the struct field matched with derived.structs off")
-			},
+			off: inCol("profile.first_name", "Given name, as the customer typed it.",
+				"the struct field did not inherit from the flat column"),
+			on: notInCol("profile.first_name", "Given name, as the customer typed it.",
+				"the struct field matched with derived.structs off"),
 		},
 		{
 			key:   "inheritance.derived.aggregates",
 			claim: "match an aggregated column to the column it was computed from",
 			build: stageBuildCfg(withDerivedColumns, enableDerived),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Derived.Aggregates = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"the aggregated column did not inherit")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"the aggregate matched with derived.aggregates off")
-			},
+			off:   inCol("total_amount_cents", "Amount, in cents.", "the aggregated column did not inherit"),
+			on: notInCol("total_amount_cents", "Amount, in cents.",
+				"the aggregate matched with derived.aggregates off"),
 		},
 		{
 			key:   "inheritance.derived.prefixes",
@@ -549,14 +427,9 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.Derived.Prefixes = []string{"grand"}
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"`total` is a default prefix and did not match")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, derivedBlock(t, s, "total_amount_cents"), "Amount, in cents.",
-					"`total` still matched after the prefix list was replaced")
-			},
+			off: inCol("total_amount_cents", "Amount, in cents.", "`total` is a default prefix and did not match"),
+			on: notInCol("total_amount_cents", "Amount, in cents.",
+				"`total` still matched after the prefix list was replaced"),
 		},
 		{
 			key:   "inheritance.derived.suffixes",
@@ -565,28 +438,19 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.Derived.Suffixes = []string{"grand"}
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, derivedBlock(t, s, "amount_cents_sum"), "Amount, in cents.",
-					"`sum` is a default suffix and did not match")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, derivedBlock(t, s, "amount_cents_sum"), "Amount, in cents.",
-					"`sum` still matched after the suffix list was replaced")
-			},
+			off: inCol("amount_cents_sum", "Amount, in cents.", "`sum` is a default suffix and did not match"),
+			on: notInCol("amount_cents_sum", "Amount, in cents.",
+				"`sum` still matched after the suffix list was replaced"),
 		},
 		{
 			key:   "inheritance.backfill.enabled",
 			claim: "take documentation up the DAG, from a node's descendants",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Backfill.Enabled = ptrTo(true) },
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, s.file(t, "models/_sources.yml"), "Identifier of an order.",
-					"the source was documented from downstream by default")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, s.file(t, "models/_sources.yml"), "Identifier of an order.",
-					"the source was not documented from the model below it")
-			},
+			off: notInFile("models/_sources.yml", "Identifier of an order.",
+				"the source was documented from downstream by default"),
+			on: inFile("models/_sources.yml", "Identifier of an order.",
+				"the source was not documented from the model below it"),
 		},
 		{
 			key:   "inheritance.backfill.sources_only",
@@ -597,14 +461,10 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Inheritance.Backfill.SourcesOnly = ptrTo(false)
 			},
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, s.file(t, "models/_mid.yml"), "Documented downstream",
-					"a model was backfilled while backfill was limited to sources")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, s.file(t, "models/_mid.yml"), "Documented downstream",
-					"the model was not backfilled from the model below it")
-			},
+			off: notInFile("models/_mid.yml", "Documented downstream",
+				"a model was backfilled while backfill was limited to sources"),
+			on: inFile("models/_mid.yml", "Documented downstream",
+				"the model was not backfilled from the model below it"),
 		},
 
 		// --- columns -------------------------------------------------------
@@ -613,49 +473,33 @@ func settingCases() []settingCase {
 			claim: "add columns the warehouse has and the YAML does not",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Columns.AddMissing = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "name: note", "a column in the catalog was not added")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "name: note", "a column was added with add_missing off")
-			},
+			off:   has("name: note", "a column in the catalog was not added"),
+			on:    lacksIn("name: note", "a column was added with add_missing off"),
 		},
 		{
 			key:   "columns.remove_stale",
 			claim: "drop columns the warehouse no longer has",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Columns.RemoveStale = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "name: legacy", "a column the catalog does not have was kept")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "name: legacy", "a column was dropped with remove_stale off")
-			},
+			off:   lacksIn("name: legacy", "a column the catalog does not have was kept"),
+			on:    has("name: legacy", "a column was dropped with remove_stale off"),
 		},
 		{
 			key:   "columns.data_types",
 			claim: "write each column's data_type from the catalog",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Columns.DataTypes = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "data_type: INTEGER", "no data type was written")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "data_type:", "a data type was written with data_types off")
-			},
+			off:   has("data_type: INTEGER", "no data type was written"),
+			on:    lacksIn("data_type:", "a data type was written with data_types off"),
 		},
 		{
 			key:   "columns.case",
 			claim: "the case a newly added column's name is written in",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Columns.Case = ptrTo("upper") },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "name: note", "the catalog's spelling was not preserved")
-			},
-			on: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "name: NOTE", "an added column was not upper-cased")
-				contains(t, stgFile(t, s), "name: ID", "an already-written spelling was churned")
-			},
+			off:   has("name: note", "the catalog's spelling was not preserved"),
+			on: both(has("name: NOTE", "an added column was not upper-cased"),
+				has("name: ID", "an already-written spelling was churned")),
 		},
 		{
 			key:   "columns.order",
@@ -670,25 +514,17 @@ func settingCases() []settingCase {
 				)
 			}),
 			set: func(_ *testing.T, c *config.Config, _ string) { c.Columns.Order = ptrTo(config.OrderAlphabetical) },
-			off: func(t *testing.T, s snapshot) {
-				assertOrder(t, stgFile(t, s), "ID", "note", "amount_cents")
-			},
-			on: func(t *testing.T, s snapshot) {
-				assertOrder(t, stgFile(t, s), "ID", "amount_cents", "note")
-			},
+			off: order("ID", "note", "amount_cents"),
+			on:  order("ID", "amount_cents", "note"),
 		},
 		{
 			key:   "columns.expand_structs",
 			claim: "document each field of a struct column under its dotted name",
 			build: stageBuild(nil),
 			set:   func(_ *testing.T, c *config.Config, _ string) { c.Columns.ExpandStructs = ptrTo(false) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "name: profile.first_name", "the struct field was not expanded")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "profile.first_name", "the struct was expanded anyway")
-				contains(t, stgFile(t, s), "name: profile", "the struct column itself disappeared")
-			},
+			off:   has("name: profile.first_name", "the struct field was not expanded"),
+			on: both(lacksIn("profile.first_name", "the struct was expanded anyway"),
+				has("name: profile", "the struct column itself disappeared")),
 		},
 		{
 			key:   "columns.comments",
@@ -697,14 +533,9 @@ func settingCases() []settingCase {
 			set: func(_ *testing.T, c *config.Config, _ string) {
 				c.Columns.Comments = ptrTo(config.WarehouseCommentsNever)
 			},
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "Free text, straight from the warehouse.",
-					"the warehouse comment was not used")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "Free text, straight from the warehouse.",
-					"the warehouse comment was used with comments: never")
-			},
+			off: has("Free text, straight from the warehouse.", "the warehouse comment was not used"),
+			on: lacksIn("Free text, straight from the warehouse.",
+				"the warehouse comment was used with comments: never"),
 		},
 
 		// --- organise ------------------------------------------------------
@@ -730,10 +561,7 @@ func settingCases() []settingCase {
 			off: func(t *testing.T, s snapshot) {
 				s.missing(t, "models/_stg.yml")
 			},
-			on: func(t *testing.T, s snapshot) {
-				body := s.file(t, "models/_stg.yml")
-				lacks(t, body, "name: stg\n", "the emptied file still lists the model")
-			},
+			on: lacksIn("name: stg\n", "the emptied file still lists the model"),
 		},
 
 		// --- output --------------------------------------------------------
@@ -752,17 +580,55 @@ func settingCases() []settingCase {
 					"      - name: legacy\n        description: Written by hand, and gone from the warehouse.\n"
 			}),
 			set: func(_ *testing.T, c *config.Config, _ string) { c.Output.Comments = ptrTo(config.CommentsOsmosis) },
-			off: func(t *testing.T, s snapshot) {
-				contains(t, stgFile(t, s), "# the analyst's note about amounts",
-					"a comment inside the column list was lost")
-			},
-			on: func(t *testing.T, s snapshot) {
-				lacks(t, stgFile(t, s), "# the analyst's note about amounts",
-					"dbt-osmosis' comment loss was not reproduced")
-			},
+			off: has("# the analyst's note about amounts", "a comment inside the column list was lost"),
+			on: lacksIn("# the analyst's note about amounts",
+				"dbt-osmosis' comment loss was not reproduced"),
 		},
 	}
 	return append(cases, sourceSettingCases()...)
+}
+
+// upstreamManifest writes a bare upstream project — artifacts only, no
+// checkout — whose single seed documents `ID` with desc.
+func upstreamManifest(t *testing.T, dir, desc string) {
+	t.Helper()
+	up := newStage()
+	up.name = "upstream"
+	up.nodes = map[string]any{
+		"seed.upstream.raw": map[string]any{
+			"unique_id": "seed.upstream.raw", "name": "raw",
+			"resource_type": "seed", "package_name": "upstream",
+			"columns":    columnMap([]map[string]any{column("ID", desc)}),
+			"depends_on": map[string]any{"nodes": []string{}},
+		},
+	}
+	up.sources = map[string]any{}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	up.writeArtifacts(t, dir)
+}
+
+// loadConfig writes dbt_ditto.yml into root and loads it, for the settings that
+// are read during loading rather than set by a caller.
+func loadConfig(t *testing.T, root, body string) *config.Config {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "dbt_ditto.yml"), body)
+	cfg, err := config.Load(filepath.Join(root, "dbt_ditto.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// withDirective gives the staging model's ID column a description that a
+// directive marker may or may not claim.
+func withDirective(desc string) func(*testing.T, *stage) {
+	return func(t *testing.T, s *stage) {
+		s.col(t, "model.demo.stg", "ID")["description"] = desc
+		s.files["models/_stg.yml"] = strings.Replace(s.files["models/_stg.yml"],
+			"      - name: ID\n", "      - name: ID\n        description: \""+desc+"\"\n", 1)
+	}
 }
 
 // withDerivedColumns adds the columns derived matching is about: an aggregate
@@ -787,9 +653,8 @@ func withPathRule(t *testing.T, s *stage) {
 	s.projectYAML += "\nmodels:\n  demo:\n    +dbt-ditto-path: \"{model}.yml\"\n"
 }
 
-// derivedBlock returns the YAML of one column entry, so an assertion about a
-// column cannot accidentally match text belonging to another.
-func derivedBlock(t *testing.T, s snapshot, column string) string {
+// colBlock returns the YAML of one column entry.
+func colBlock(t *testing.T, s snapshot, column string) string {
 	t.Helper()
 	body := stgFile(t, s)
 	start := strings.Index(body, "- name: "+column+"\n")
@@ -812,20 +677,23 @@ func hasWarning(s snapshot, substr string) bool {
 	return false
 }
 
-// assertOrder checks that the named columns appear in this order.
-func assertOrder(t *testing.T, body string, names ...string) {
-	t.Helper()
-	at := -1
-	for _, name := range names {
-		i := strings.Index(body, "- name: "+name+"\n")
-		if i < 0 {
-			t.Fatalf("column %q was not written:\n%s", name, body)
+// order checks that the named columns appear in this order.
+func order(names ...string) check {
+	return func(t *testing.T, s snapshot) {
+		t.Helper()
+		body := stgFile(t, s)
+		at := -1
+		for _, name := range names {
+			i := strings.Index(body, "- name: "+name+"\n")
+			if i < 0 {
+				t.Fatalf("column %q was not written:\n%s", name, body)
+			}
+			if i < at {
+				t.Errorf("column %q is out of order, wanted %v:\n%s", name, names, body)
+				return
+			}
+			at = i
 		}
-		if i < at {
-			t.Errorf("column %q is out of order, wanted %v:\n%s", name, names, body)
-			return
-		}
-		at = i
 	}
 }
 
@@ -862,9 +730,8 @@ func TestSettingsDoWhatTheyClaim(t *testing.T) {
 	}
 }
 
-// TestEverySettingIsCovered walks the config structs and fails if a key has no
-// case above. A setting with no test is a setting nobody has checked does
-// anything, and the tables in the README are written from these claims.
+// TestEverySettingIsCovered walks the config structs and fails if a key has no case
+// above.
 func TestEverySettingIsCovered(t *testing.T) {
 	covered := map[string]bool{}
 	for _, c := range settingCases() {

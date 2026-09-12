@@ -8,21 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// OrderedMap is a JSON object that remembers the order its keys were written
-// in. dbt writes a column's `meta` in the order the analyst typed it into the
-// YAML, and merging inherited meta has to preserve that order to produce the
-// same file back, so the plain map[string]any that encoding/json would give us
-// is not enough.
+// OrderedMap is a JSON object that remembers key order.
 type OrderedMap struct {
 	keys   []string
 	values map[string]any
 }
 
 // MarshalYAML renders the map as a YAML mapping in key order.
-//
-// Without this the struct's fields are unexported, so yaml.v3 writes `{}` — an
-// empty map where a nested meta value should be. That is the failure mode a
-// nested value hits first: it appears, it is empty, and nothing errors.
 func (m *OrderedMap) MarshalYAML() (any, error) {
 	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if m == nil {
@@ -173,9 +165,8 @@ func (m *OrderedMap) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// normaliseNumbers turns json.Number into int64 where it is integral and
-// float64 otherwise, so that a meta value round-trips through YAML as the
-// number the analyst wrote rather than as 1e+06.
+// normaliseNumbers turns json.Number into int64 where integral and float64
+// otherwise, so a meta value round-trips as written rather than as 1e+06.
 func normaliseNumbers(v any) any {
 	switch t := v.(type) {
 	case json.Number:
@@ -202,7 +193,6 @@ func normaliseNumbers(v any) any {
 }
 
 // UnionTags appends add to have, dropping duplicates and keeping first-seen
-// order.
 func UnionTags(have, add []string) []string {
 	if len(add) == 0 {
 		return have

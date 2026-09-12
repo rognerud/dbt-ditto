@@ -1,16 +1,4 @@
-"""Shared plumbing for dbt-ditto source providers.
-
-A provider is a program dbt-ditto runs to document its **external sources** —
-the raw tables no dbt project builds, which inheritance can never reach because
-a source is a root of the DAG. dbt-ditto writes a request to stdin and reads a
-response from stdout; see .agents/source-providers.md for the contract.
-
-Nothing here talks to a warehouse. This module resolves *how* to talk to one,
-by reading the connection dbt itself uses: the request names each project's
-root, its `profile:` and the profiles directory, so a provider authenticates
-exactly the way `dbt run` does for the same project rather than asking for a
-second copy of the same credentials.
-"""
+"""Shared plumbing for dbt-ditto source providers."""
 
 from __future__ import annotations
 
@@ -139,13 +127,32 @@ def read_request(stream=None) -> Request:
     return Request(projects=projects, sources=sources)
 
 
-def write_response(docs: Iterable[Doc], warnings: Iterable[str] = ()) -> None:
-    """Write the response to stdout.
+def each_project(request: Request, adapter: str, warnings: list[str]):
+    """Yield (profile, sources) for each project whose target is this adapter.
 
-    Only stdout carries the answer; anything a person should read goes to
-    stderr, and anything dbt-ditto should report goes in `warnings`. A provider
-    that prints progress to stdout produces a response that will not parse.
+    A project whose credentials cannot be resolved, or whose target belongs to
+    another warehouse, is skipped with a warning rather than failing the run.
     """
+    for project_name, sources in request.by_project().items():
+        project = request.projects.get(project_name) or Project(
+            name=project_name, root="", profile="", target="", profiles_dir=""
+        )
+        try:
+            profile = load_profile(project)
+        except SystemExit as err:
+            warnings.append(f"{project_name}: {err}")
+            continue
+        if (profile.get("type") or "").lower() != adapter:
+            warnings.append(
+                f"{project_name}: profile target is {profile.get('type')!r}, "
+                f"not {adapter}; skipped"
+            )
+            continue
+        yield profile, sources
+
+
+def write_response(docs: Iterable[Doc], warnings: Iterable[str] = ()) -> None:
+    """Write the response to stdout."""
     json.dump(
         {
             "version": CONTRACT_VERSION,
@@ -161,14 +168,7 @@ def write_response(docs: Iterable[Doc], warnings: Iterable[str] = ()) -> None:
 
 
 def load_profile(project: Project) -> dict[str, Any]:
-    """Return the resolved `outputs.<target>` block for a project.
-
-    dbt's own loader is used when dbt-core is importable, because it is the only
-    thing guaranteed to agree with dbt about Jinja, `env_var` defaults and
-    target selection. The hand-rolled fallback exists so a provider still works
-    in an environment that has the warehouse SDK but not dbt — a CI job that
-    only refreshes source documentation, say.
-    """
+    """Return the resolved `outputs.<target>` block for a project."""
     try:
         return _load_profile_with_dbt(project)
     except Exception:  # noqa: BLE001 - any dbt failure falls back to reading the file
@@ -209,13 +209,7 @@ def _load_profile_from_yaml(project: Project) -> dict[str, Any]:
 
 
 def _render_env_vars(value: Any) -> Any:
-    """Resolve the one Jinja call that appears in almost every profiles.yml.
-
-    `{{ env_var('NAME') }}` and its two-argument form are what a profile uses to
-    keep a secret out of the file. Full Jinja is dbt's job and is used when dbt
-    is importable; this covers the case that matters without pulling in a
-    template engine to read one string.
-    """
+    """Resolve the one Jinja call that appears in almost every profiles.yml."""
     import re
 
     pattern = re.compile(
@@ -247,11 +241,6 @@ def _render_env_vars(value: Any) -> Any:
 
 
 def fail(message: str) -> None:
-    """Report a fatal problem the way dbt-ditto surfaces it.
-
-    A non-zero exit with the reason on stderr becomes one warning naming this
-    provider, and the run carries on documenting everything else — unless
-    `sources.strict` is set, which is the project saying it would rather stop.
-    """
+    """Report a fatal problem the way dbt-ditto surfaces it."""
     print(message, file=sys.stderr)
     raise SystemExit(1)

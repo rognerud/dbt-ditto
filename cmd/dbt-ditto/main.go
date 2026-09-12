@@ -1,5 +1,4 @@
 // Command dbt-ditto propagates dbt column and model documentation down the
-// DAG, across projects, and writes it back into schema YAML.
 package main
 
 import (
@@ -14,9 +13,7 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/runner"
 )
 
-// Stamped at build time with -ldflags "-X main.version=...". A build produced
-// by `go install` has no ldflags, so these fall back to what the Go toolchain
-// recorded in the binary.
+// Stamped at build time with -ldflags "-X main.version=...".
 var (
 	version = ""
 	commit  = ""
@@ -154,8 +151,8 @@ func run(args []string) error {
 	fs.BoolVar(&verbose, "verbose", false, "list every change")
 	fs.BoolVar(&verbose, "v", false, "list every change")
 
-	// Flags may come after the project directory. Go's flag package stops at the
-	// first non-flag argument, so parsing is resumed after each positional:
+	// Flags may come after the project directory, and Go's flag package stops at
+	// the first non-flag argument, so parsing resumes after each positional:
 	// otherwise `dbt-ditto inherit ./project --dry-run` would silently write.
 	var positional []string
 	rest := args[1:]
@@ -184,17 +181,15 @@ func run(args []string) error {
 		}
 	}
 
-	// Notes are about how the projects were assembled (a dbt-loom manifest that
-	// could not be reached, say), so they belong before the run, not with the
-	// per-column warnings it produces.
+	// Notes are about how the projects were assembled, so they belong before the
+	// run rather than with the per-column warnings it produces.
 	for _, n := range cfg.Notes {
 		fmt.Fprintln(os.Stderr, "note:", n)
 	}
 
-	// Refreshing reaches the network and rewrites the cache, so it is not
-	// something --check should ever do on its own: the point of the cache is
-	// that CI reads it rather than dialling out. Asking for both is a mistake
-	// worth naming rather than silently resolving.
+	// Refreshing reaches the network and rewrites the cache, which is not something
+	// --check should do: the point of the cache is that CI reads it rather than
+	// dialling out. Asking for both is a mistake worth naming.
 	if refresh && check {
 		return fmt.Errorf("--refresh-sources and --check are contradictory: --check must not reach the warehouse; refresh first, then check")
 	}
@@ -240,11 +235,10 @@ func run(args []string) error {
 		fmt.Printf("%s %s\n", verb, f)
 	}
 
-	// Warnings go to stderr: they are about the project, not about this run, and
-	// nothing downstream should have to filter them out of the change list.
+	// Warnings go to stderr: they are about the project, not about this run.
 	for _, w := range rep.Warnings {
-		// A warning about the node itself carries no column, and printing the
-		// separator anyway reads as a column named "".
+		// A warning about the node itself carries no column, and the separator would
+		// read as a column named "".
 		where := w.Node
 		if w.Column != "" {
 			where += "." + w.Column

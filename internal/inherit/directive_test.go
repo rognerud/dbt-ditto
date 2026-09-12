@@ -9,8 +9,8 @@ import (
 
 // --- directives ------------------------------------------------------------
 
-// The case name matching cannot solve: the column was renamed on the way down,
-// so nothing links `cust_id` to `customer_id` except the analyst saying so.
+// The case name matching cannot solve: nothing links `cust_id` to
+// `customer_id` except the analyst saying so.
 func TestDirectivePointsAtARenamedColumn(t *testing.T) {
 	up := seed("p", "raw", col("customer_id", "Surrogate key of the customer."))
 	down := node("p", "stg", []string{"seed.p.raw"},
@@ -31,8 +31,8 @@ func TestDirectivePointsAtARenamedColumn(t *testing.T) {
 	}
 }
 
-// A unique_id is accepted too, which is the only way to name a node whose
-// resource name is not unique across projects.
+// A unique_id is accepted too, the only way to name a node whose resource name
+// is not unique across projects.
 func TestDirectiveAcceptsAUniqueID(t *testing.T) {
 	up := seed("p", "raw", col("customer_id", "Surrogate key of the customer."))
 	down := node("p", "stg", []string{"seed.p.raw"},
@@ -44,8 +44,7 @@ func TestDirectiveAcceptsAUniqueID(t *testing.T) {
 	}
 }
 
-// The directive wins over ordinary inheritance: a column that also matches an
-// upstream name by accident still takes what it was pointed at.
+// The directive wins over ordinary inheritance, accidental name match included.
 func TestDirectiveBeatsNameMatching(t *testing.T) {
 	up := seed("p", "raw", col("id", "The wrong one."), col("customer_id", "The right one."))
 	down := node("p", "stg", []string{"seed.p.raw"}, col("id", "Inherited: raw.customer_id"))
@@ -56,8 +55,8 @@ func TestDirectiveBeatsNameMatching(t *testing.T) {
 	}
 }
 
-// An unresolvable directive is left in the file and reported. Dropping it would
-// lose the instruction; writing it back without a word would look like prose.
+// An unresolvable directive is left in the file and reported: dropping it loses
+// the instruction, keeping it silently looks like prose.
 func TestUnresolvableDirectiveWarnsAndIsKept(t *testing.T) {
 	up := seed("p", "raw", col("customer_id", "Surrogate key of the customer."))
 	down := node("p", "stg", []string{"seed.p.raw"},
@@ -87,8 +86,8 @@ func TestDirectiveNamingAnUnknownNodeWarns(t *testing.T) {
 	}
 }
 
-// Pointing at a column that exists but says nothing is a mistake worth hearing
-// about: the analyst thinks that column is documented, and it is not.
+// Pointing at an undocumented column is worth hearing about: the analyst thinks
+// it is documented.
 func TestDirectiveToAnUndocumentedColumnWarns(t *testing.T) {
 	up := seed("p", "raw", col("customer_id", ""))
 	down := node("p", "stg", []string{"seed.p.raw"}, col("cust_id", "Inherited: raw.customer_id"))
@@ -100,8 +99,7 @@ func TestDirectiveToAnUndocumentedColumnWarns(t *testing.T) {
 	}
 }
 
-// Prose that merely begins with the word is not a directive: there is no dot,
-// so it cannot name a column.
+// Prose merely beginning with the word is not a directive: no dot, no column.
 func TestOrdinaryProseIsNotADirective(t *testing.T) {
 	up := seed("p", "raw", col("id", "Upstream."))
 	down := node("p", "stg", []string{"seed.p.raw"},
@@ -181,8 +179,7 @@ func TestParentsThatAgreeAreNotAmbiguous(t *testing.T) {
 	}
 }
 
-// A nearer generation overriding a further one is inheritance working, not a
-// disagreement, so it is not reported.
+// A nearer generation overriding a further one is inheritance working.
 func TestGenerationsOverridingEachOtherAreNotAmbiguous(t *testing.T) {
 	root := seed("p", "raw", col("id", "The root's wording."))
 	mid := node("p", "mid", []string{"seed.p.raw"}, col("id", "The nearer wording."))
@@ -210,9 +207,8 @@ func TestALocallyDocumentedColumnIsNotAmbiguous(t *testing.T) {
 	if got := columnDoc(t, doc, "id"); got.Description != "Written here, deliberately." {
 		t.Errorf("description = %q, want the local one kept", got.Description)
 	}
-	// The ancestors still disagree with one another, and the run still says so:
-	// the column is documented today, but the disagreement upstream is real and
-	// will decide the answer the moment the local description is removed.
+	// The ancestors still disagree, and the run still says so: the disagreement
+	// decides the answer the moment the local description is removed.
 	if len(doc.Warnings) != 1 || doc.Warnings[0].Kind != WarnAmbiguous {
 		t.Fatalf("warnings = %v, want the upstream disagreement reported", doc.Warnings)
 	}

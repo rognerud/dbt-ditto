@@ -16,9 +16,8 @@ func writeTemp(t *testing.T, content string) string {
 	return path
 }
 
-// Anything dbt-ditto does not manage — comments, key order, tests, unknown
-// keys — has to survive untouched. This is the difference between a tool people
-// will run on their repository and one they will not.
+// Anything dbt-ditto does not manage — comments, key order, tests, unknown keys
+// — has to survive untouched, or nobody will run this on their repository.
 func TestUnmanagedContentSurvivesARoundTrip(t *testing.T) {
 	const doc = `version: 2
 
@@ -69,8 +68,7 @@ func TestSaveOnlyWritesWhenSomethingChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Loading and saving without edits must leave the file alone, even though
-	// the renderer might format it differently from how it was typed.
+	// Loading and saving without edits must leave the file alone.
 	if wrote, err := f.Save(false); err != nil {
 		t.Fatal(err)
 	} else if wrote {
@@ -182,8 +180,7 @@ func TestSourceTableNavigatesTheNesting(t *testing.T) {
 	}
 }
 
-// Replacing a value in place must keep the key where it was and keep any
-// comment attached to it.
+// Replacing a value in place keeps the key where it was, comment included.
 func TestMapSetPreservesPositionAndComments(t *testing.T) {
 	path := writeTemp(t, "version: 2\nmodels:\n  - name: a\n    # why this matters\n    description: old\n    meta:\n      owner: x\n")
 	f, err := Load(path)
@@ -222,8 +219,7 @@ func TestMapDelete(t *testing.T) {
 	}
 }
 
-// A multi-line description should be written as a literal block, not as one
-// long escaped line.
+// A multi-line description is written as a literal block, not one escaped line.
 func TestMultiLineScalarsUseALiteralBlock(t *testing.T) {
 	f := New(filepath.Join(t.TempDir(), "schema.yml"))
 	MapSet(f.Entry("models", "a", true), "description", Scalar("First line.\nSecond line.\n"))

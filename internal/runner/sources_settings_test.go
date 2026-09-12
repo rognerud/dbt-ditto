@@ -11,14 +11,13 @@ import (
 )
 
 // The stage's `crm.orders` source is external: nothing in the project builds
-// `demo.main.orders`. That is the one node a source provider has anything to
-// say about, so every case here is written in terms of it.
+// `demo.main.orders`, so it is the one node a provider has anything to say
+// about, and every case here is written in terms of it.
 const externalSource = "source.demo.crm.orders"
 
-// sourceDoc is the cache entry a provider would have produced. Written
-// directly rather than spawned, because most of these settings are about what
-// happens to an answer, not about how it was obtained — and a test that shells
-// out to prove a label routing rule is a slower test of the same thing.
+// sourceDoc is the cache entry a provider would have produced, written directly
+// rather than spawned: these settings are about what happens to an answer, not
+// how it was obtained.
 func sourceDoc(columns ...map[string]any) map[string]any {
 	return map[string]any{
 		"unique_id":   externalSource,
@@ -57,8 +56,8 @@ func writeSourceCache(t *testing.T, dir string, docs ...map[string]any) {
 	writeFile(t, path, string(body))
 }
 
-// stageWithSourceCache is the common build: the shared stage plus an answer
-// about its one external source.
+// stageWithSourceCache is the common build: the stage plus an answer about its
+// one external source.
 func stageWithSourceCache(docs ...map[string]any) func(*testing.T) (string, *config.Config) {
 	return func(t *testing.T) (string, *config.Config) {
 		t.Helper()
@@ -68,8 +67,7 @@ func stageWithSourceCache(docs ...map[string]any) func(*testing.T) (string, *con
 	}
 }
 
-// labelledColumn is `order_id` with a classification on it, which is the case
-// the propagation rules exist for.
+// labelledColumn is `order_id` with a classification on it.
 func labelledColumn() map[string]any {
 	return sourceColumn("order_id", withLabels(map[string]string{"classification": "restricted"}))
 }
@@ -85,8 +83,8 @@ func hasNote(s snapshot, substr string) bool {
 	return false
 }
 
-// echoProvider is a provider written as a shell one-liner: it reads the
-// request so nothing is left blocked on a pipe, and prints a fixed answer.
+// echoProvider is a shell one-liner: it reads the request so nothing blocks on
+// a pipe, and prints a fixed answer.
 func echoProvider(t *testing.T, docs ...map[string]any) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"version": 1, "sources": docs})
@@ -106,9 +104,8 @@ func sourceSettingCases() []settingCase {
 			claim:   "names a program that documents external sources, run on --refresh-sources",
 			refresh: true,
 			build: func(t *testing.T) (string, *config.Config) {
-				// The `off` run has a provider that answers nothing, because a
-				// refresh with none configured is an error rather than a run
-				// that quietly does less.
+				// The `off` run has a provider that answers nothing, because a refresh with
+				// none configured is an error rather than a run that quietly does less.
 				return providerStage(t, echoProvider(t))
 			},
 			set: func(t *testing.T, c *config.Config, dir string) {
@@ -131,8 +128,7 @@ func sourceSettingCases() []settingCase {
 				return providerStage(t, echoProvider(t, sourceDoc(sourceColumn("order_id"))))
 			},
 			set: func(t *testing.T, c *config.Config, dir string) {
-				// The stage's source lives in `demo`, so this claims nothing and
-				// the provider is never asked.
+				// The stage's source lives in `demo`, so this claims nothing.
 				c.Sources.Providers[0].Match.Database = "elsewhere"
 			},
 			off: func(t *testing.T, s snapshot) {
@@ -186,8 +182,8 @@ func sourceSettingCases() []settingCase {
 			claim: "reads and writes the provider answer somewhere other than target/",
 			build: func(t *testing.T) (string, *config.Config) {
 				dir := newStage().write(t, t.TempDir())
-				// Only the non-default location has an answer, so the setting is
-				// what decides whether the source gets documented at all.
+				// Only the non-default location has an answer, so the setting decides whether
+				// the source is documented at all.
 				path := filepath.Join(dir, "ci", "sources.json")
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
@@ -249,8 +245,7 @@ func sourceSettingCases() []settingCase {
 		{
 			key:   "sources.labels.tag_format",
 			claim: "controls how a label pair is rendered as a tag",
-			// Both runs route to tags, because the format is only observable
-			// once something is rendered as one; only the rendering differs.
+			// Both runs route to tags, since the format is only observable once rendered.
 			build: func(t *testing.T) (string, *config.Config) {
 				dir, cfg := stageWithSourceCache(sourceDoc(labelledColumn()))(t)
 				cfg.Sources.Labels.Mode = ptrTo(config.LabelsTags)
@@ -388,8 +383,7 @@ func sourceSettingCases() []settingCase {
 			key:   "inheritance.extra_keys",
 			claim: "carries column keys this tool does not model, such as policy_tags, down the DAG",
 			build: stageBuild(func(t *testing.T, s *stage) {
-				// dbt writes policy_tags on the column itself; nothing in
-				// dbt-ditto understands it, which is the point.
+				// dbt writes policy_tags on the column itself, and nothing here understands it.
 				s.col(t, "seed.demo.raw", "id")["policy_tags"] = []string{"taxonomies/1/policyTags/2"}
 			}),
 			set: func(t *testing.T, c *config.Config, dir string) {

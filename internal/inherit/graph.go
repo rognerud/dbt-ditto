@@ -1,5 +1,4 @@
 // Package inherit builds the cross-project dependency graph and resolves what
-// each node's documentation should be after inheritance.
 package inherit
 
 import (
@@ -11,16 +10,12 @@ import (
 )
 
 // Graph is the union of every loaded project's nodes, keyed by unique_id, with
-// cross-manifest edges resolved. This is the piece that replaces dbt-loom: an
-// upstream project's manifest is loaded alongside the downstream one and their
-// dependency edges are stitched together, so a downstream model can inherit
-// from a model that lives in another repository.
+// cross-manifest edges resolved.
 type Graph struct {
 	Nodes    map[string]*dbt.Node
 	Projects []*dbt.Project
 
 	// byName indexes nodes by lower-cased resource name, used to repair edges
-	// whose target unique_id is not literally present in any manifest.
 	byName map[string][]*dbt.Node
 	parent map[string][]string
 
@@ -34,7 +29,6 @@ type Graph struct {
 }
 
 // BuildGraph merges the projects into a single graph. Projects are listed
-// upstream-first only for tie-breaking; edge direction comes from depends_on.
 func BuildGraph(projects []*dbt.Project) *Graph {
 	g := &Graph{
 		Nodes:    make(map[string]*dbt.Node),
@@ -56,8 +50,7 @@ func BuildGraph(projects []*dbt.Project) *Graph {
 	for id, n := range g.Nodes {
 		deps := make([]string, 0, len(n.DependsOn.Nodes))
 		for _, dep := range n.DependsOn.Nodes {
-			// dbt-osmosis only walks documentable ancestors; tests and other
-			// resource types are not sources of column knowledge.
+			// dbt-osmosis only walks documentable ancestors.
 			if !documentablePrefix(dep) {
 				continue
 			}
@@ -65,9 +58,8 @@ func BuildGraph(projects []*dbt.Project) *Graph {
 				deps = append(deps, dep)
 				continue
 			}
-			// Cross-project ref: dbt records the upstream unique_id, but the
-			// upstream project may publish it under a different package name.
-			// Fall back to matching on the resource name.
+			// Cross-project ref: the upstream project may publish the node under a
+			// different package name, so fall back to matching on the resource name.
 			if resolved, ok := g.resolveByName(dep, n); ok {
 				deps = append(deps, resolved)
 			}
@@ -93,9 +85,8 @@ func (g *Graph) add(id string, n *dbt.Node) {
 	g.byName[key] = append(g.byName[key], n)
 }
 
-// resolveByName maps an unresolvable dependency unique_id onto a node in
-// another manifest. Only public models are eligible, matching dbt's own
-// cross-project access rules.
+// resolveByName maps an unresolvable dependency unique_id onto a node in another
+// manifest. Only public models are eligible, matching dbt's own access rules.
 func (g *Graph) resolveByName(depID string, from *dbt.Node) (string, bool) {
 	parts := strings.Split(depID, ".")
 	if len(parts) < 3 {
@@ -125,11 +116,7 @@ func (g *Graph) resolveByName(depID string, from *dbt.Node) (string, bool) {
 // Parents returns the resolved direct upstream unique_ids of a node.
 func (g *Graph) Parents(id string) []string { return g.parent[id] }
 
-// FindNode resolves a human-written node reference: either a unique_id, or a
-// bare resource name as it would be written in a `ref()`. The second return
-// value is false when the name matches more than one node, since silently
-// picking one of them is how a directive ends up meaning the opposite of what
-// it says.
+// FindNode resolves a unique_id or a bare resource name as written in a `ref()`.
 func (g *Graph) FindNode(ref string) (*dbt.Node, bool) {
 	if n, ok := g.Nodes[ref]; ok {
 		return n, true
@@ -142,17 +129,10 @@ func (g *Graph) FindNode(ref string) (*dbt.Node, bool) {
 }
 
 // maxGenerations bounds the ancestor walk, as dbt-osmosis does, so a cyclic or
-// pathological graph cannot hang the run.
 const maxGenerations = 100
 
-// Generations returns the node's ancestors grouped by distance, nearest first:
-// index 0 holds the direct parents, index 1 their parents, and so on. Each
-// group is sorted by unique_id.
-//
-// The grouping deliberately reproduces dbt-osmosis' ancestor tree: the walk is
-// depth-first with a single shared visited set, so a node reachable by several
-// routes is filed under the depth at which the walk first reached it, not its
-// shortest path. Getting this wrong changes which ancestor wins a conflict.
+// Generations returns the node's ancestors grouped by distance, nearest first, each
+// group sorted by unique_id.
 func (g *Graph) Generations(id string) [][]*dbt.Node {
 	g.genMu.Lock()
 	defer g.genMu.Unlock()
@@ -206,12 +186,8 @@ func (g *Graph) walk(id string, depth int, byDepth map[int][]string, visited map
 	}
 }
 
-// Descendants returns the nodes downstream of id, grouped by distance and
-// nearest first, mirroring Generations in the other direction.
-//
-// A source table has nothing above it, so the only documentation that can exist
-// in the graph is below it: the staging model that reads it. Walking downwards
-// is what lets that documentation be carried back up into the source.
+// Descendants returns the nodes downstream of id, grouped by distance and nearest
+// first, mirroring Generations.
 func (g *Graph) Descendants(id string) [][]*dbt.Node {
 	g.childOnce.Do(func() {
 		g.child = make(map[string][]string, len(g.parent))
@@ -262,8 +238,7 @@ func (g *Graph) Descendants(id string) [][]*dbt.Node {
 	return out
 }
 
-// Ancestors returns every upstream node reachable from id, nearest generation
-// first. It is a flattened Generations, kept for callers that do not care which
+// Ancestors is a flattened Generations, for callers that do not care which
 // generation a node came from.
 func (g *Graph) Ancestors(id string) []*dbt.Node {
 	var out []*dbt.Node

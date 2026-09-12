@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// writeLoomProject lays out a project directory with a dbt_loom.config.yml and
-// the upstream manifest it points at.
+// writeLoomProject lays out a project with a dbt_loom.config.yml and the
+// upstream manifest it points at.
 func writeLoomProject(t *testing.T, loom string) (dir, root string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -32,8 +32,8 @@ func writeLoomProject(t *testing.T, loom string) (dir, root string) {
 	return dir, root
 }
 
-// A project that already tells dbt-loom where its upstreams live should not have
-// to repeat that list in dbt_ditto.yml.
+// A project that already tells dbt-loom where its upstreams live should not
+// have to repeat that list in dbt_ditto.yml.
 func TestLoadPicksUpLoomFileManifests(t *testing.T) {
 	dir, _ := writeLoomProject(t, `manifests:
   - name: platform
@@ -62,9 +62,8 @@ func TestLoadPicksUpLoomFileManifests(t *testing.T) {
 	}
 }
 
-// The remote loom backends are dbt-loom fetching artifacts over the network.
-// dbt-ditto does not do that, and saying nothing would leave the analyst
-// wondering why half their documentation did not arrive.
+// The remote loom backends fetch over the network, which dbt-ditto does not do;
+// saying nothing would leave the analyst wondering what went missing.
 func TestLoadNotesUnreachableLoomManifests(t *testing.T) {
 	dir, _ := writeLoomProject(t, `manifests:
   - name: platform
@@ -95,8 +94,7 @@ func TestLoadNotesUnreachableLoomManifests(t *testing.T) {
 	}
 }
 
-// An explicit entry in dbt_ditto.yml is the analyst overriding loom, most
-// likely to point at a checkout they can actually write to.
+// An explicit entry in dbt_ditto.yml is the analyst overriding loom.
 func TestLoomEntryIsStillAddedForAProjectAlreadyListed(t *testing.T) {
 	dir, _ := writeLoomProject(t, `manifests:
   - name: platform
@@ -114,9 +112,8 @@ func TestLoomEntryIsStillAddedForAProjectAlreadyListed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Three entries, because at this stage nothing has read a manifest: a path
-	// and a loom name cannot be known to be the same project yet. The duplicate
-	// is dropped after loading, by the name each manifest reports.
+	// Three entries, because nothing has read a manifest yet: a path and a loom
+	// name cannot be known to be one project until after loading.
 	if len(c.Projects) != 3 {
 		t.Fatalf("got %d projects, want 3: %+v", len(c.Projects), c.Projects)
 	}
@@ -125,8 +122,7 @@ func TestLoomEntryIsStillAddedForAProjectAlreadyListed(t *testing.T) {
 	}
 }
 
-// Loom naming the same project twice is a duplicate this stage can see, since
-// both names come from the same file.
+// Loom naming the same project twice is a duplicate this stage can see.
 func TestLoomEntriesAreDedupedAmongThemselves(t *testing.T) {
 	dir, _ := writeLoomProject(t, `manifests:
   - name: platform

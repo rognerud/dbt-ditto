@@ -16,19 +16,15 @@ import (
 
 // Provider is one configured external program and the sources it answers for.
 type Provider struct {
-	// Command is run through the platform shell, so a provider can be written
-	// as `uv run ./fetch.py --project foo` without the config having to model
-	// argument splitting. Providers are named in a project's own config file,
-	// by the people who run the tool, so this is no more powerful than what
-	// they can already do.
+	// Command is run through the platform shell, so a provider can be written as `uv run
+	// ./fetch.py --project foo` without the config modelling argument splitting.
 	Command string
-	// Database and Schema are glob patterns limiting which sources this
-	// provider is asked about. Empty matches everything.
+	// Database and Schema are glob patterns limiting which sources this provider is
+	// asked about. Empty matches everything.
 	Database string
 	Schema   string
-	// Dir is the working directory the command runs in, normally the directory
-	// the config file was found in, so a relative command path means what a
-	// person reading the config thinks it means.
+	// Dir is the working directory the command runs in, normally where the config
+	// file was found, so a relative command path means what it looks like.
 	Dir string
 	// Timeout bounds one invocation.
 	Timeout time.Duration
@@ -40,8 +36,7 @@ func (p Provider) Claims(s RequestSource) bool {
 }
 
 // globMatch is an empty-means-everything wrapper over path.Match, folded,
-// because warehouse identifiers are not case sensitive in most places and a
-// pattern that matches only one spelling is a trap.
+// because warehouse identifiers are mostly not case sensitive.
 func globMatch(pattern, value string) bool {
 	if pattern == "" {
 		return true
@@ -50,18 +45,10 @@ func globMatch(pattern, value string) bool {
 	return err == nil && ok
 }
 
-// DefaultTimeout bounds a provider that has hung. Metadata lookups are fast;
-// anything past this is a provider waiting on something it will not get, and a
-// documentation run should not be held open by it.
+// DefaultTimeout bounds a provider that has hung.
 const DefaultTimeout = 2 * time.Minute
 
 // Fetch asks every provider about the sources it claims and merges the answers.
-//
-// Providers run in parallel and independently: one failing produces a warning
-// and the others still contribute, because a tool that formats YAML should not
-// stop doing it because BigQuery is unreachable. Call Fetch only from an
-// explicit refresh — the ordinary run reads the cache, so `--check` in CI never
-// spawns anything and needs no credentials.
 func Fetch(ctx context.Context, providers []Provider, projects []RequestProject, want []RequestSource) *Set {
 	set := &Set{Docs: map[string]*Doc{}}
 	if len(providers) == 0 || len(want) == 0 {
@@ -100,8 +87,8 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 	}
 	wg.Wait()
 
-	// Merged in configured order so "first provider to claim a source wins" is
-	// a rule someone can read off their own config.
+	// Merged in configured order, so "first provider to claim a source wins" is a
+	// rule someone can read off their own config.
 	for _, res := range results {
 		p := providers[res.provider]
 		if res.err != nil {
@@ -152,8 +139,7 @@ func run(ctx context.Context, p Provider, projects []RequestProject, want []Requ
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// A provider's stderr is the only explanation a person will get, so it
-		// is carried into the warning rather than discarded with the exit code.
+		// A provider's stderr is the only explanation a person will get.
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, lastLine(msg))
 		}
@@ -171,8 +157,8 @@ func run(ctx context.Context, p Provider, projects []RequestProject, want []Requ
 	return &resp, nil
 }
 
-// lastLine keeps the final line of a provider's stderr. A Python traceback is
-// twenty lines of this tool's users' business and one line of the actual error.
+// lastLine keeps the final line of a provider's stderr: a Python traceback is
+// twenty lines of noise and one line of the actual error.
 func lastLine(s string) string {
 	lines := strings.Split(s, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {

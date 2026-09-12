@@ -9,10 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A project using dbt-loom has already written down where its upstream
-// manifests come from, so that list is read from here rather than asked for a
-// second time in dbt_ditto.yml. Only the list: loom's own job at dbt runtime is
-// untouched, and dbt-ditto runs afterwards over artifacts on disk.
+// A project using dbt-loom has already written down where its upstream manifests come
+// from, so that list is read from here rather than asked for again in dbt_ditto.yml.
 const loomFilename = "dbt_loom.config.yml"
 
 // loomEnv is dbt-loom's own override for the config location.
@@ -31,10 +29,7 @@ type loomManifest struct {
 }
 
 // attachLoomUpstreams appends an upstream ProjectRef for every local manifest a
-// configured project's dbt_loom.config.yml points at. Projects already listed
-// in dbt_ditto.yml win: an explicit entry is the analyst overriding what loom
-// happens to say. Nothing here is fatal — a project whose loom config cannot be
-// read is a project that inherits from fewer places, not a failed run.
+// project's dbt_loom.config.yml points at.
 func (c *Config) attachLoomUpstreams() {
 	if c.Loom != nil && !*c.Loom {
 		return
@@ -47,8 +42,8 @@ func (c *Config) attachLoomUpstreams() {
 		}
 	}
 
-	// Only the projects configured up front are scanned; refs appended below
-	// are manifests, not checkouts, and have no loom config of their own.
+	// Only the projects configured up front are scanned; refs appended below are
+	// manifests, not checkouts, and have no loom config of their own.
 	for _, ref := range append([]ProjectRef(nil), c.Projects...) {
 		if ref.Path == "" {
 			continue
@@ -70,9 +65,8 @@ func (c *Config) attachLoomUpstreams() {
 			if m.Name != "" && seen[m.Name] {
 				continue
 			}
-			// Only `type: file` names something this process can open; the
-			// remote types are loom fetching over the network. Said out loud
-			// rather than silently inheriting from fewer projects.
+			// Only `type: file` names something this process can open; the remote types are
+			// loom fetching over the network. Said out loud rather than silently skipped.
 			if !strings.EqualFold(m.Type, "file") {
 				c.Notes = append(c.Notes, fmt.Sprintf(
 					"%s: skipping dbt-loom manifest %q (type %q): only `type: file` is read; download the artifact and add it as `manifest:` in dbt_ditto.yml",
@@ -86,8 +80,7 @@ func (c *Config) attachLoomUpstreams() {
 				continue
 			}
 			if !filepath.IsAbs(p) {
-				// dbt-loom resolves a relative path against the directory dbt
-				// runs in, which is the project root the config sits in.
+				// dbt-loom resolves a relative path against the project root the config sits in.
 				p = filepath.Join(root, p)
 			}
 			if _, err := os.Stat(p); err != nil {
@@ -108,7 +101,6 @@ func (c *Config) attachLoomUpstreams() {
 }
 
 // loomConfigPath returns the dbt-loom config governing a project root, honouring
-// DBT_LOOM_CONFIG the way dbt-loom itself does.
 func loomConfigPath(root string) (string, bool) {
 	if env := os.Getenv(loomEnv); env != "" {
 		p := env
@@ -140,7 +132,6 @@ func readLoomConfig(path string) ([]loomManifest, error) {
 }
 
 // rel shortens a path for a message, falling back to the absolute path when the
-// two are not under a common root.
 func rel(base, path string) string {
 	if r, err := filepath.Rel(base, path); err == nil && !strings.HasPrefix(r, "..") {
 		return filepath.ToSlash(r)

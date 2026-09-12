@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Run the dbt CLI against a fake Snowflake.
-
-`fakesnow` replaces `snowflake.connector` with an implementation backed by
-DuckDB. dbt-snowflake talks to Snowflake through exactly that connector, so
-patching it before dbt starts gives a real dbt run — real adapter, real macros,
-real `docs generate` — against no infrastructure at all.
-
-That matters because it makes the Snowflake artifacts *generated* rather than
-hand-written: the catalog comes out of the adapter's own catalog macro, and its
-identifier casing and type names are Snowflake's, not a guess at Snowflake's.
-
-    python scripts/lib/dbt_fakesnow.py <db-path> run --quiet
-"""
+"""Run the dbt CLI against a fake Snowflake."""
 
 from __future__ import annotations
 

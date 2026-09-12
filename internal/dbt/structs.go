@@ -3,28 +3,16 @@ package dbt
 import "strings"
 
 // StructField is one field of a struct-typed column, named by its full dotted
-// path from the top-level column.
 type StructField struct {
 	// Path is the dotted name dbt documents the field under, e.g.
-	// "profile.first_name".
 	Path string
 	// Type is the field's own warehouse type.
 	Type string
 }
 
-// StructFields expands a struct-typed column into the dotted field paths dbt
-// uses to document nested data. It returns nil for any type that is not a
-// struct, so callers can pass every column through it.
-//
-// The spellings warehouses use differ:
-//
-//	DuckDB      STRUCT(first_name VARCHAR, last_name VARCHAR)
-//	BigQuery    STRUCT<first_name STRING, last_name STRING>
-//	BigQuery    ARRAY<STRUCT<id INT64>>          (a repeated record)
-//	Snowflake   OBJECT(id NUMBER)
-//
-// Nesting and arrays are followed, because a field's documentation belongs to
-// it however deeply it is buried.
+// StructFields expands a struct-typed column into the dotted field paths dbt documents
+// nested data under, and returns nil for any other type, so callers can pass every
+// column through it.
 func StructFields(column, dataType string) []StructField {
 	var out []StructField
 	collectStructFields(column, dataType, &out, 0)
@@ -57,12 +45,10 @@ func collectStructFields(prefix, dataType string, out *[]StructField, depth int)
 }
 
 // structBody returns the inside of a struct type declaration, unwrapping any
-// array that contains it.
 func structBody(dataType string) (string, bool) {
 	t := strings.TrimSpace(dataType)
 
-	// `STRUCT(...)[]` and `ARRAY<STRUCT<...>>` both mean a repeated record; the
-	// fields are documented the same way either way.
+	// `STRUCT(...)[]` and `ARRAY<STRUCT<...>>` both mean a repeated record.
 	for {
 		trimmed := strings.TrimSpace(t)
 		if strings.HasSuffix(trimmed, "[]") {
@@ -110,7 +96,6 @@ func unwrapKeyword(t, keyword string) (string, bool) {
 }
 
 // splitFields splits a struct body on the commas that separate fields, ignoring
-// commas nested inside a field's own type.
 func splitFields(body string) []string {
 	var fields []string
 	depth := 0
@@ -145,7 +130,6 @@ func splitFields(body string) []string {
 }
 
 // splitNameAndType separates `name TYPE`, allowing the name to be quoted and
-// the type to contain spaces.
 func splitNameAndType(field string) (string, string, bool) {
 	f := strings.TrimSpace(field)
 	if f == "" {
@@ -161,8 +145,7 @@ func splitNameAndType(field string) (string, string, bool) {
 		return "", "", false
 	}
 
-	// BigQuery writes `name TYPE`; an anonymous field is just a type, which has
-	// no name to document.
+	// An anonymous field is just a type, with no name to document.
 	i := strings.IndexAny(f, " \t")
 	if i < 0 {
 		return "", "", false

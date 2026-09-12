@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// The order dbt lists its nodes in is not deterministic, so the same
-// documentation can arrive as two different files. Canonicalising both has to
-// produce the same bytes, or the parity comparison is a coin toss.
+// dbt's node order is not deterministic, so the same documentation can arrive
+// as two different files; canonicalising both has to produce the same bytes.
 func TestTwoOrdersCanoniciseAlike(t *testing.T) {
 	const first = `version: 2
 models:
@@ -52,8 +51,7 @@ models:
 	}
 }
 
-// Column order inside an entry is the warehouse's ordinal order, which both
-// tools reproduce, so it must be left alone.
+// Column order inside an entry is the warehouse's, which both tools reproduce.
 func TestColumnOrderIsKept(t *testing.T) {
 	const in = `version: 2
 models:
@@ -72,8 +70,7 @@ models:
 	}
 }
 
-// Sources nest one level deeper: the sources themselves and each source's
-// tables are both named entries.
+// Sources nest one level deeper: sources and their tables are both named.
 func TestSourceTablesAreSorted(t *testing.T) {
 	const in = `version: 2
 sources:
@@ -98,8 +95,7 @@ sources:
 	}
 }
 
-// Configuration files are not schema and must not be rewritten, since their
-// top-level keys are not named entry lists.
+// Configuration files are not schema: their top-level keys are not entry lists.
 func TestConfigFilesAreSkipped(t *testing.T) {
 	for _, name := range []string{"dbt_project.yml", "profiles.yml", "dbt_ditto.yml"} {
 		if IsSchemaFile(name) {

@@ -13,16 +13,6 @@ import (
 )
 
 // The version matrix.
-//
-// dbt-ditto reads manifest.json and catalog.json and nothing else, so a
-// captured pair is a complete record of what a given dbt version looks like.
-// scripts/matrix.sh runs real dbt once per version and commits the pair;
-// everything below then holds every version at once, with no Python, no dbt and
-// no warehouse. That split is what makes the matrix affordable to run on every
-// commit rather than nightly.
-//
-// Adding a version is one line in scripts/matrix.sh and a rerun of it. These
-// tests pick up whatever is on disk.
 
 // matrixCase is one captured dbt version.
 type matrixCase struct {
@@ -32,10 +22,8 @@ type matrixCase struct {
 		AdapterVersion   string `json:"adapter_version"`
 		DbtVersion       string `json:"dbt_version"`
 		DbtSchemaVersion string `json:"dbt_schema_version"`
-		// EmulatedBy names the stand-in that produced these artifacts, if any.
-		// Snowflake's come from fakesnow, which puts a real dbt-snowflake in
-		// front of DuckDB, so the artifacts are the adapter's own work even
-		// though no Snowflake was involved.
+		// EmulatedBy names the stand-in that produced these artifacts, if any:
+		// Snowflake's come from fakesnow, a real dbt-snowflake over DuckDB.
 		EmulatedBy string `json:"emulated_by"`
 	}
 }
@@ -56,9 +44,7 @@ func (c matrixCase) name() string { return c.Meta.Adapter + "-" + c.Meta.DbtVers
 // loadMatrix reads every captured version.
 func loadMatrix(t *testing.T) []matrixCase {
 	t.Helper()
-	// The matrix replays every captured adapter and dbt version. That is cheap
-	// in absolute terms but it is the bulk of the suite, so `-short` leaves it
-	// out and the pre-commit hook stays quick.
+	// The matrix replays every captured adapter and version.
 	if testing.Short() {
 		t.Skip("skipping the version matrix in short mode")
 	}
@@ -92,8 +78,8 @@ func loadMatrix(t *testing.T) []matrixCase {
 	return cases
 }
 
-// matrixProject stages the matrix project with one version's artifacts in place
-// of its target directory, and returns the project root.
+// matrixProject stages the matrix project with one version's artifacts as its
+// target directory, and returns the project root.
 func matrixProject(t *testing.T, c matrixCase) string {
 	t.Helper()
 	root := t.TempDir()
@@ -125,9 +111,7 @@ func matrixConfig(root string) *config.Config {
 }
 
 // TestMatrixRuns is the blunt instrument: every dbt version must parse, resolve
-// and write without error, and produce the documentation the fixture is built
-// to produce. A manifest field that changes shape between versions shows up
-// here first.
+// and write without error, and produce what the fixture is built to produce.
 func TestMatrixRuns(t *testing.T) {
 	for _, c := range loadMatrix(t) {
 		t.Run(c.name(), func(t *testing.T) {
@@ -162,11 +146,8 @@ func TestMatrixRuns(t *testing.T) {
 	}
 }
 
-// The version in the manifest is what decides where column meta goes: dbt
-// gained column-level `config:` in 1.9.6, and writing meta there on an older
-// dbt loses it silently. This is the single most version-sensitive decision
-// dbt-ditto makes, so it is asserted against every captured version rather
-// than unit-tested against a made-up version string.
+// The manifest's version decides where column meta goes: dbt gained column-level
+// `config:` in 1.9.6, and writing meta there on an older dbt loses it silently.
 func TestMatrixConfigBlockFollowsTheDbtVersion(t *testing.T) {
 	for _, c := range loadMatrix(t) {
 		t.Run(c.name(), func(t *testing.T) {
@@ -190,9 +171,8 @@ func TestMatrixConfigBlockFollowsTheDbtVersion(t *testing.T) {
 	}
 }
 
-// A rerun must change nothing, on every version. This is the assertion most
-// likely to catch a version-specific quirk, because it fails whenever the
-// second pass disagrees with the first about anything at all.
+// A rerun must change nothing, on every version — the assertion most likely to
+// catch a version-specific quirk.
 func TestMatrixRunsAreIdempotent(t *testing.T) {
 	for _, c := range loadMatrix(t) {
 		t.Run(c.name(), func(t *testing.T) {
@@ -214,9 +194,7 @@ func TestMatrixRunsAreIdempotent(t *testing.T) {
 	}
 }
 
-// Every version must agree on the column set and on the documentation, whatever
-// else changed in the manifest between them. Only the placement of meta is
-// allowed to differ, and that is asserted separately above.
+// Every version must agree on the column set and the documentation.
 func TestMatrixVersionsAgree(t *testing.T) {
 	cases := loadMatrix(t)
 	if len(cases) < 2 {
@@ -250,8 +228,7 @@ func TestMatrixVersionsAgree(t *testing.T) {
 		results = append(results, r)
 	}
 
-	// Compared within an adapter, not across: Snowflake upper-cases its
-	// identifiers, so its column names legitimately differ from DuckDB's.
+	// Within an adapter, not across: Snowflake upper-cases its identifiers.
 	byAdapter := map[string][]result{}
 	for _, r := range results {
 		byAdapter[r.adapter] = append(byAdapter[r.adapter], r)
@@ -277,9 +254,8 @@ func TestMatrixVersionsAgree(t *testing.T) {
 }
 
 // Snowflake upper-cases every unquoted identifier, so its catalog reports
-// ORDER_ID where the YAML says order_id. Inheritance has to bridge that, a new
-// column has to be written with the warehouse's spelling, and an entry already
-// in the file has to keep its own. None of this is reachable on DuckDB.
+// ORDER_ID where the YAML says order_id: inheritance has to bridge that, a new
+// column takes the warehouse's spelling, and an existing entry keeps its own.
 func TestMatrixSnowflakeCaseHandling(t *testing.T) {
 	var found bool
 	for _, c := range loadMatrix(t) {
@@ -294,16 +270,14 @@ func TestMatrixSnowflakeCaseHandling(t *testing.T) {
 			}
 			files := snapshotTree(t, root)
 
-			// A model with no YAML of its own: every column is new, so each is
-			// written with the spelling the warehouse reports.
+			// A model with no YAML: every column is new, so each takes the warehouse's.
 			stg := files["models/_stg_orders.yml"]
 			for _, column := range []string{"ORDER_ID", "CUSTOMER_ID", "STATUS", "AMOUNT_CENTS"} {
 				if !strings.Contains(stg, "- name: "+column+"\n") {
 					t.Errorf("want the warehouse spelling %s:\n%s", column, stg)
 				}
 			}
-			// ...and it still inherited, across the case difference, from a
-			// seed documented in lower case.
+			// ...and it still inherited across the case difference.
 			if !strings.Contains(stg, "Surrogate key for an order.") {
 				t.Errorf("ORDER_ID did not inherit from order_id:\n%s", stg)
 			}
@@ -312,8 +286,7 @@ func TestMatrixSnowflakeCaseHandling(t *testing.T) {
 				t.Errorf("want Snowflake types:\n%s", stg)
 			}
 
-			// The seed is documented in lower case already, and must stay that
-			// way rather than being rewritten to the warehouse's spelling.
+			// The seed is documented in lower case already, and must stay that way.
 			seeds := files["seeds/_seeds.yml"]
 			if !strings.Contains(seeds, "- name: order_id\n") {
 				t.Errorf("an existing lower-case entry was rewritten:\n%s", seeds)
@@ -344,10 +317,7 @@ func TestMatrixSpansTheConfigBlockBoundary(t *testing.T) {
 	}
 }
 
-// Postgres is dbt's reference adapter and the closest thing the matrix has to a
-// control. It also has real COMMENT ON support, so it is the second warehouse
-// on which a description written in the database — rather than in dbt — is
-// shown to reach the YAML.
+// Postgres is dbt's reference adapter and the matrix's control.
 func TestMatrixPostgres(t *testing.T) {
 	var found bool
 	for _, c := range loadMatrix(t) {
@@ -362,8 +332,7 @@ func TestMatrixPostgres(t *testing.T) {
 			}
 			files := snapshotTree(t, root)
 
-			// Postgres keeps unquoted identifiers lower case, unlike Snowflake,
-			// and has its own type vocabulary.
+			// Postgres keeps unquoted identifiers lower case, and has its own types.
 			stg := files["models/_stg_orders.yml"]
 			if !strings.Contains(stg, "- name: order_id\n") {
 				t.Errorf("want lower-case identifiers:\n%s", stg)
@@ -375,15 +344,12 @@ func TestMatrixPostgres(t *testing.T) {
 				t.Errorf("inheritance from the seed failed:\n%s", stg)
 			}
 
-			// `channel` carries a COMMENT ON COLUMN written in the database and
-			// is documented nowhere in dbt, so its description can only have
-			// come from the warehouse.
+			// `channel` carries a COMMENT ON COLUMN and is documented nowhere in dbt.
 			seeds := files["seeds/_seeds.yml"]
 			if !strings.Contains(seeds, "Sales channel the order arrived through.") {
 				t.Errorf("the Postgres column comment did not reach the YAML:\n%s", seeds)
 			}
-			// ...while a column dbt does document keeps the hand-written text,
-			// whatever the database says.
+			// ...while a column dbt documents keeps the hand-written text.
 			if !strings.Contains(seeds, "Order lifecycle state: one of completed, pending or returned.") {
 				t.Errorf("a hand-written description was lost:\n%s", seeds)
 			}
@@ -394,10 +360,7 @@ func TestMatrixPostgres(t *testing.T) {
 	}
 }
 
-// BigQuery, from a manifest dbt-bigquery itself wrote. There is no usable local
-// BigQuery, so only the manifest is generated and the catalog is hand-built;
-// meta.json records that. The deep BigQuery coverage -- nested RECORDs,
-// ARRAY<STRUCT<...>>, policy tags -- is in bigquery_test.go.
+// BigQuery, from a manifest dbt-bigquery itself wrote.
 func TestMatrixBigQuery(t *testing.T) {
 	var found bool
 	for _, c := range loadMatrix(t) {
@@ -415,8 +378,7 @@ func TestMatrixBigQuery(t *testing.T) {
 			if stg == "" {
 				t.Fatal("stg_orders was not documented")
 			}
-			// BigQuery keeps unquoted identifiers as written, and has its own
-			// type names.
+			// BigQuery keeps unquoted identifiers as written, and has its own type names.
 			if !strings.Contains(stg, "- name: order_id\n") {
 				t.Errorf("want the identifiers as written:\n%s", stg)
 			}
@@ -433,8 +395,7 @@ func TestMatrixBigQuery(t *testing.T) {
 	}
 }
 
-// Every adapter the rig claims to cover must actually be present, so a row that
-// quietly stops being captured is noticed rather than silently skipped.
+// Every adapter the rig claims to cover must actually be present.
 func TestMatrixCoversEveryAdapter(t *testing.T) {
 	seen := map[string]bool{}
 	for _, c := range loadMatrix(t) {

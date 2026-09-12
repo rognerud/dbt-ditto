@@ -1,13 +1,9 @@
 # Source providers
 
 Optional add-ons that document **external sources** — the raw tables no dbt
-project builds — from the warehouse's own metadata.
-
-Inheritance cannot reach a source. A source is a root of the DAG, so there is
-nothing upstream to inherit from, and the only documentation that exists is
-whatever somebody typed into the `sources:` YAML. The warehouse usually knows
-more: a description on the table, a description on each column, labels or tags,
-a policy tag. A provider fetches that.
+project builds — from the warehouse's own metadata. A source is a root of the
+DAG, so inheritance cannot reach it; the warehouse usually knows more than the
+`sources:` YAML does, and a provider fetches that.
 
 | | |
 |---|---|
@@ -16,8 +12,8 @@ a policy tag. A provider fetches that.
 | `echo.py` | answers from a file — the shortest complete example, and what the Go test suite runs |
 | `dbt_ditto_provider.py` | shared: the contract, and profiles.yml resolution |
 
-Adding a warehouse means writing one of these. It needs no change to dbt-ditto.
-Why providers are separate programs, and how their output is merged, is in
+Adding a warehouse means writing one of these, with no change to dbt-ditto. Why
+they are separate programs and how their output is merged is in
 [docs/source-providers.md](../../docs/source-providers.md); configuring them is
 in [docs/usage.md](../../docs/usage.md#asking-the-warehouse-source-providers).
 
@@ -25,17 +21,14 @@ in [docs/usage.md](../../docs/usage.md#asking-the-warehouse-source-providers).
 
 A provider is told each project's root, its `profile:` and the profiles
 directory, and resolves the connection from `profiles.yml` — the same entry,
-the same target, the same method that `dbt run` uses for that project. Nothing
-is configured twice, and there is no second copy of a secret to keep in step.
+target and method `dbt run` uses. dbt's own loader is used when `dbt-core` is
+importable, being the only thing guaranteed to agree with dbt about Jinja and
+`env_var` defaults; failing that, `profiles.yml` is read directly and `env_var`
+resolved, so a CI job needs the warehouse SDK but not dbt.
 
-dbt's own loader is used when `dbt-core` is importable, because it is the only
-thing guaranteed to agree with dbt about Jinja and `env_var` defaults. Failing
-that, `profiles.yml` is read directly and `env_var` is resolved, so a CI job
-that refreshes documentation needs the warehouse SDK but not dbt.
-
-`--target` picks the target, falling back to `$DBT_TARGET` and then to whatever
-the profile calls default. `$DBT_PROFILES_DIR` is honoured, as is a
-`profiles.yml` beside `dbt_project.yml`.
+`--target` picks the target, falling back to `$DBT_TARGET` and then to the
+profile's default. `$DBT_PROFILES_DIR` is honoured, as is a `profiles.yml`
+beside `dbt_project.yml`.
 
 ## The contract
 
@@ -75,32 +68,25 @@ Response on stdout:
 Unknown fields are ignored in both directions, so the contract can grow without
 a version bump.
 
-**`labels` is the neutral bucket.** Key-value pairs attached to an object are
-the one piece of metadata every warehouse has — BigQuery labels, Snowflake and
-Unity Catalog tags, Glue table parameters — so a provider reports them raw and
-dbt-ditto routes them into `meta` or `tags` per the project's own configuration.
-Do not decide that here; a provider that picked would be a provider each project
-had to override.
-
-**`extra` is for everything else**, under the key it is written with in dbt
-YAML. A BigQuery policy tag goes here because nothing else has one. It is
-carried only when the project lists the key in `inheritance.extra_keys`, so a
-provider reporting it into a project that never asked writes nothing.
-
-**stdout is the answer.** Progress and errors go to stderr; a provider that
-prints anything else to stdout produces a response that will not parse. Exiting
-non-zero with a reason on stderr is how a provider reports a fatal problem — the
-last line is what dbt-ditto shows.
+- **`labels` is the neutral bucket**: key-value pairs attached to an object are
+  the one piece of metadata every warehouse has, so a provider reports them raw
+  and dbt-ditto routes them into `meta` or `tags` per the project's config. A
+  provider that decided would be one each project had to override.
+- **`extra` is for everything else**, under the key it is written with in dbt
+  YAML — a BigQuery policy tag, say. It is carried only when the project lists
+  the key in `inheritance.extra_keys`.
+- **stdout is the answer.** Progress and errors go to stderr; anything else on
+  stdout produces a response that will not parse. Exiting non-zero with a reason
+  on stderr reports a fatal problem, and the last line is what dbt-ditto shows.
 
 ## Writing one
 
-Start from `echo.py`; it is forty lines and uses the same shared module the real
+Start from `echo.py`: forty lines, using the same shared module the real
 providers do. `python packaging/providers/test_providers.py` runs the offline
-tests — the contract, profiles.yml resolution, and the type rendering that has
-to agree with what each dbt adapter writes into `catalog.json`. No account is
-needed for any of it.
+tests — contract, profiles.yml resolution, and type rendering — with no account
+needed.
 
-Rendering types to match the adapter is worth the trouble: a project that runs
-both dbt-ditto and `dbt docs generate` otherwise gets a diff on every
-`data_type:`. `bigquery.py` reproduces ``STRUCT<`name` TYPE>`` and
-`ARRAY<...>`; `snowflake.py` reproduces `VARCHAR(16777216)` and `NUMBER(38,0)`.
+Rendering types to match the adapter is worth the trouble, or a project running
+both dbt-ditto and `dbt docs generate` gets a diff on every `data_type:`.
+`bigquery.py` reproduces ``STRUCT<`name` TYPE>`` and `ARRAY<...>`;
+`snowflake.py` reproduces `VARCHAR(16777216)` and `NUMBER(38,0)`.

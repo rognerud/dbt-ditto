@@ -10,11 +10,8 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/sources"
 )
 
-// applySources documents the external sources — the raw tables no loaded
-// project builds — from the source-provider cache, refreshing it first when
-// asked. The cache is what makes this safe on by default: an ordinary run reads
-// a file and spawns nothing, so `--check` in CI needs no credentials and cannot
-// be failed by a flaky API.
+// applySources documents the external sources from the provider cache, refreshing it
+// first when asked.
 func applySources(cfg *config.Config, resolved config.Resolved, graph *inherit.Graph, opts Options) ([]string, error) {
 	external, _ := graph.ClassifySources()
 	if len(external) == 0 {
@@ -57,9 +54,8 @@ func applySources(cfg *config.Config, resolved config.Resolved, graph *inherit.G
 	return notes, nil
 }
 
-// sourceProviders turns the configured providers into the runnable form,
-// resolving relative commands against the config file's own directory so a
-// command path means what the person who wrote it thinks it means.
+// sourceProviders turns the configured providers into runnable form, resolving
+// relative commands against the config file's own directory.
 func sourceProviders(cfg *config.Config) []sources.Provider {
 	out := make([]sources.Provider, 0, len(cfg.Sources.Providers))
 	for _, p := range cfg.Sources.Providers {
@@ -76,11 +72,9 @@ func sourceProviders(cfg *config.Config) []sources.Provider {
 	return out
 }
 
-// shadowedSourceWarnings reports a `source:` pointing at a relation a loaded
-// project builds: a DAG root that inherits nothing, standing in front of a
-// documented model, which almost always wants to be a cross-project ref.
-//
-// Restricted to the selected nodes, so `--select` stays meaningful.
+// shadowedSourceWarnings reports a `source:` pointing at a relation a loaded project
+// builds: a DAG root inheriting nothing, standing in front of a documented model, which
+// almost always wants to be a cross-project ref.
 func shadowedSourceWarnings(graph *inherit.Graph, targets []*dbt.Node) []inherit.Warning {
 	_, shadowed := graph.ClassifySources()
 	if len(shadowed) == 0 {

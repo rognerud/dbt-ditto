@@ -7,8 +7,7 @@ import (
 )
 
 // The defaults are a promise: pointing dbt-ditto at a project dbt-osmosis
-// already manages must not change the YAML, beyond the progenitor annotation
-// below. If one of these moves, parity with dbt-osmosis moves with it.
+// manages must not change the YAML, beyond the progenitor annotation below.
 func TestDefaultsMatchDbtOsmosis(t *testing.T) {
 	r := (&Config{}).Resolve()
 
@@ -23,15 +22,13 @@ func TestDefaultsMatchDbtOsmosis(t *testing.T) {
 		{"inherit tags", r.InheritTags, true},
 		{"case insensitive matching", r.CaseInsensitive, true},
 		{"force", r.Force, false},
-		// The one deliberate departure: provenance is recorded by default, so a
-		// project chasing byte parity has to set `progenitor: false`.
+		// The one deliberate departure: provenance is recorded by default.
 		{"progenitor annotation", r.Progenitor, true},
 		{"progenitor key", r.ProgenitorKey, "osmosis_progenitor"},
 		{"directives", r.Directives, true},
 		{"directive prefix", r.DirectivePrefix, DefaultDirectivePrefix},
 		{"ambiguity warnings", r.WarnAmbiguous, true},
-		// Off: it writes meta dbt-osmosis never would, which would break the
-		// byte-for-byte promise the rest of this table exists to keep.
+		// Off: it writes meta dbt-osmosis never would, breaking byte parity.
 		{"ambiguity annotation", r.AmbiguityMeta, false},
 		{"ambiguity key", r.AmbiguityKey, DefaultAmbiguityKey},
 		{"add missing columns", r.AddMissing, true},

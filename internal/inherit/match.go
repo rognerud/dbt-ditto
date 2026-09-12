@@ -8,10 +8,8 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// Matching a downstream column to an upstream one is tried in this order, and
-// the first strategy that finds anything wins. Ordering matters more than the
-// individual strategies: a column that shares its name with an upstream column
-// must never be given a guess instead, however plausible the guess.
+// Matching a downstream column to an upstream one is tried in this order, and the first
+// strategy that finds anything wins.
 type matchRank int
 
 const (
@@ -29,25 +27,15 @@ const (
 )
 
 // columnIndex holds one ancestor's columns keyed by every name a descendant
-// might plausibly know them by. It is built once per ancestor and reused across
-// every node that inherits from it, which matters because a widely used staging
+// might know them by, built once per ancestor and reused: a widely used staging
 // model is an ancestor of hundreds of others.
 type columnIndex struct {
 	// One map per rank: the rank records how far the alias is from the
-	// column's real name.
 	byRank [matchNone]map[string]*dbt.Column
 }
 
-// rankPairs is the order in which a downstream alias is tried against an
-// upstream alias, cheapest total distance first.
-//
-// Both sides need aliasing, and independently. Packing `amount_cents` into a
-// struct renames it downstream; summing it renames it downstream; the upstream
-// column may itself already be a struct field. So a match is a pair of
-// derivations, one applied at each end, and the pair with the least total
-// distance wins. Exact/exact costs nothing and therefore always wins, which is
-// the property that matters: a column that shares a name with an upstream
-// column is never given a guess instead.
+// rankPairs is the order a downstream alias is tried against an upstream one, cheapest
+// total distance first.
 var rankPairs = func() [][2]matchRank {
 	var pairs [][2]matchRank
 	for total := 0; total <= 2*int(matchNone-1); total++ {
@@ -82,7 +70,6 @@ func (i *columnIndex) lookup(keys [matchNone][]string) (*dbt.Column, matchRank) 
 }
 
 // matcher derives the alternative names a column may be known by, under the
-// configured rules.
 type matcher struct {
 	cfg config.Resolved
 
@@ -91,8 +78,8 @@ type matcher struct {
 
 func newMatcher(cfg config.Resolved) *matcher { return &matcher{cfg: cfg} }
 
-// enabled reports whether any derived matching is configured. When it is not,
-// the matcher is bypassed entirely and behaviour is dbt-osmosis'.
+// enabled reports whether any derived matching is configured; when it is not,
+// the matcher is bypassed and behaviour is dbt-osmosis'.
 func (m *matcher) enabled() bool {
 	return m.cfg.DerivedStructs || m.cfg.DerivedAggregates
 }
@@ -112,13 +99,8 @@ func leaf(name string) string {
 	return name
 }
 
-// stripAggregate returns the name with a single leading or trailing aggregate
-// word removed, in every combination that applies. The name itself is not
-// included.
-//
-// Stripping is limited to one word at each end: going further turns
-// `max_order_count` into `order`, which is no longer obviously the same thing,
-// and a wrong description is worse than none.
+// stripAggregate returns the name with a single leading or trailing aggregate word
+// removed, in every combination that applies, excluding the name itself.
 func (m *matcher) stripAggregate(name string) []string {
 	if name == "" || !m.cfg.DerivedAggregates {
 		return nil
@@ -161,7 +143,6 @@ func (m *matcher) stripAggregate(name string) []string {
 }
 
 // trimWord removes `word_` from the front or `_word` from the back. Only whole
-// underscore-separated words count, so `counterparty` keeps its `count`.
 func trimWord(name, word string, prefix bool) (string, bool) {
 	if word == "" {
 		return "", false
@@ -180,9 +161,8 @@ func trimWord(name, word string, prefix bool) (string, bool) {
 	return "", false
 }
 
-// eachKey calls yield with every folded lookup key a column name can be found
-// under, and the rank at which that key counts as a match. keysFor and indexFor
-// are the two sides of the same lookup, so they derive their keys from here.
+// eachKey calls yield with every folded lookup key a column name can be found under,
+// and the rank at which it counts as a match.
 func (m *matcher) eachKey(name string, yield func(matchRank, string)) {
 	yield(matchExact, m.fold(name))
 	if !m.enabled() {
@@ -204,7 +184,6 @@ func (m *matcher) eachKey(name string, yield func(matchRank, string)) {
 }
 
 // keysFor returns the lookup keys for a downstream column name, grouped by the
-// rank at which each may match.
 func (m *matcher) keysFor(name string) [matchNone][]string {
 	var keys [matchNone][]string
 	m.eachKey(name, func(rank matchRank, key string) {
@@ -227,8 +206,7 @@ func (m *matcher) indexFor(n *dbt.Node) *columnIndex {
 		if idx.byRank[rank] == nil {
 			idx.byRank[rank] = map[string]*dbt.Column{}
 		}
-		// First writer wins, so a column earlier in the node keeps the key
-		// rather than a later one silently taking it over.
+		// First writer wins, so an earlier column keeps the key.
 		if _, taken := idx.byRank[rank][key]; !taken {
 			idx.byRank[rank][key] = c
 		}
@@ -242,14 +220,9 @@ func (m *matcher) indexFor(n *dbt.Node) *columnIndex {
 	return actual.(*columnIndex)
 }
 
-// find returns the ancestor column a downstream column should inherit from,
-// and how far the match had to travel. The rank matters beyond bookkeeping: a
-// description survives being summed and a classification does not, so it
-// decides what is carried across.
-//
-// The last return value reports whether the ancestor has the column at all,
-// even undocumented, which is what decides whether the ancestor claims the
-// column for its generation and shadows everything behind it.
+// find returns the ancestor column a downstream column should inherit from and how far
+// the match travelled; the rank decides what is carried across, since a description
+// survives being summed and a classification does not.
 func (m *matcher) find(a *dbt.Node, name string, keys [matchNone][]string) (*dbt.Column, matchRank, bool) {
 	if c, rank := m.indexFor(a).lookup(keys); rank != matchNone {
 		return c, rank, true

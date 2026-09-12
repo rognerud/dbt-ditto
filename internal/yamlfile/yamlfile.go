@@ -1,5 +1,4 @@
 // Package yamlfile edits dbt schema YAML in place through yaml.Node, so that
-// comments, key order and formatting survive a round trip.
 package yamlfile
 
 import (
@@ -20,15 +19,11 @@ type File struct {
 	Created bool
 
 	original []byte
-	// loadedPrint fingerprints the document as it was read. Serialising YAML is
-	// expensive, so a run that ends up leaving a file exactly as it found it —
-	// which is what `--check` does on a healthy repository, and most of what any
-	// re-run does — compares fingerprints instead of rendering.
+	// loadedPrint fingerprints the document as it was read.
 	loadedPrint uint64
 }
 
 // Load reads a schema YAML file. An empty or whitespace-only file is treated as
-// a fresh document rather than an error.
 func Load(path string) (*File, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -91,10 +86,9 @@ func (f *File) Render() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Changed reports whether rendering the document would alter the file on disk.
-// It returns the rendered bytes when there is a change, and nil when there is
-// not: an unmodified document is recognised by its fingerprint and never
-// rendered at all.
+// Changed reports whether rendering the document would alter the file on disk,
+// returning the rendered bytes when it would and nil when it would not: an
+// unmodified document is recognised by its fingerprint and never rendered.
 func (f *File) Changed() (bool, []byte, error) {
 	if !f.Created && fingerprint(f.Doc) == f.loadedPrint {
 		return false, nil, nil
@@ -106,14 +100,8 @@ func (f *File) Changed() (bool, []byte, error) {
 	return !bytes.Equal(out, f.original), out, nil
 }
 
-// fingerprint hashes everything about a document that affects how it is
-// written out, so an untouched document can be recognised without serialising
-// it. Comments are included because moving one changes the file.
-//
-// It is a hand-rolled FNV-1a rather than hash/fnv because the standard
-// interface takes []byte: hashing a node's six strings through it would convert
-// each one, and a fingerprint is taken for every file both before and after the
-// run.
+// fingerprint hashes everything about a document that affects how it is written out, so
+// an untouched one is recognised without serialising it.
 func fingerprint(n *yaml.Node) uint64 {
 	h := uint64(fnvOffset)
 	hashNode(&h, n)
@@ -164,7 +152,6 @@ func hashNode(h *uint64, n *yaml.Node) {
 }
 
 // Save writes the document if it differs from what is on disk. It returns
-// whether a write was needed, so callers can report and `--check` can fail.
 func (f *File) Save(dryRun bool) (bool, error) {
 	changed, out, err := f.Changed()
 	if err != nil || !changed {
@@ -186,7 +173,6 @@ func (f *File) Save(dryRun bool) (bool, error) {
 }
 
 // IsEmpty reports whether the document carries no dbt content, meaning the file
-// can be deleted after its last entry has been moved elsewhere.
 func (f *File) IsEmpty() bool {
 	root := f.Root()
 	for i := 0; i+1 < len(root.Content); i += 2 {
@@ -207,8 +193,7 @@ func (f *File) IsEmpty() bool {
 }
 
 // Seq returns the sequence node stored under key, creating it when create is
-// set. It returns nil if the key is absent (or not a sequence) and create is
-// false.
+// set, and nil when the key is absent or not a sequence.
 func (f *File) Seq(key string, create bool) *yaml.Node {
 	root := f.Root()
 	if n := MapGet(root, key); n != nil {
@@ -229,7 +214,6 @@ func (f *File) Seq(key string, create bool) *yaml.Node {
 }
 
 // Entry finds the mapping in the named sequence whose `name` matches, creating
-// it when create is set.
 func (f *File) Entry(seqKey, name string, create bool) *yaml.Node {
 	seq := f.Seq(seqKey, create)
 	if seq == nil {
@@ -248,7 +232,6 @@ func (f *File) Entry(seqKey, name string, create bool) *yaml.Node {
 }
 
 // RemoveEntry drops the named entry from a sequence and reports whether it was
-// present.
 func (f *File) RemoveEntry(seqKey, name string) bool {
 	seq := f.Seq(seqKey, false)
 	if seq == nil {
@@ -267,7 +250,6 @@ func (f *File) RemoveEntry(seqKey, name string) bool {
 }
 
 // SourceTable locates `sources[name=source].tables[name=table]`, creating the
-// source and table entries when create is set.
 func (f *File) SourceTable(source, table string, create bool) *yaml.Node {
 	src := f.Entry("sources", source, create)
 	if src == nil {
@@ -315,8 +297,8 @@ func MapGet(m *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// MapSet assigns key in a mapping, replacing the value in place if the key
-// already exists so that key order and any attached comments are preserved.
+// MapSet assigns key in a mapping, replacing the value in place when the key
+// exists so key order and attached comments are preserved.
 func MapSet(m *yaml.Node, key string, val *yaml.Node) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
@@ -345,7 +327,6 @@ func MapDelete(m *yaml.Node, key string) bool {
 }
 
 // Scalar builds a string scalar, using a literal block for multi-line text so
-// long descriptions stay readable.
 func Scalar(s string) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s}
 	if strings.Contains(s, "\n") {

@@ -22,9 +22,6 @@ export GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}"
 mkdir -p "${TMPDIR}"
 
 # Locate uv by trying to run each candidate, rather than with `command -v`.
-# A sandbox can permit executing a file while denying stat on the directory
-# holding it, in which case PATH lookup fails on a tool that works perfectly
-# well. Set UV=/path/to/uv to skip the search.
 find_uv() {
   local candidate
   for candidate in "${UV:-}" uv "${HOME}/.local/bin/uv" /opt/homebrew/bin/uv \
@@ -68,11 +65,7 @@ FOREIGN_WHEEL="${DIST}/dbt_ditto-${VERSION}-py3-none-${FOREIGN_TAG}.whl"
 
 fail() { echo "  FAIL: $*" >&2; exit 1; }
 
-# mode prints a file's permission string. The executable bit is the whole point
-# of this script — a wheel once shipped the binary without it, which uv
-# tolerated and pip turned into "permission denied" — so the mode is reported
-# rather than merely asserted. `stat` spells this differently on BSD and GNU,
-# and both run this script, so both spellings are tried.
+# mode prints a file's permission string.
 mode() {
   stat -f '%Sp' "$1" 2>/dev/null || stat -c '%A' "$1"
 }

@@ -12,10 +12,9 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/runner"
 )
 
-// The fixture is deliberately small, so the benchmarks run against a generated
-// project instead: a wide staging layer over a documented seed, a chain of
-// intermediate models to give inheritance some depth, and a mart layer that
-// fans back out. Sizes are chosen to bracket what real warehouses look like.
+// The fixture is deliberately small, so the benchmarks generate a project: a
+// wide staging layer over a documented seed, a chain of intermediate models,
+// and a mart layer that fans back out.
 var benchShapes = []struct {
 	name    string
 	models  int
@@ -35,9 +34,7 @@ func BenchmarkRun(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				// Every iteration starts from a project that has not been
-				// documented yet, otherwise all but the first would measure the
-				// much cheaper no-op path.
+				// Every iteration starts undocumented, or all but the first measure the no-op.
 				work := b.TempDir()
 				if err := copyTree(src, work); err != nil {
 					b.Fatal(err)
@@ -85,9 +82,7 @@ func BenchmarkRunNoOp(b *testing.B) {
 	}
 }
 
-// generateProject writes a synthetic dbt project: dbt_project.yml plus the
-// manifest and catalog that `dbt parse` and `dbt docs generate` would produce.
-// It returns the project root.
+// generateProject writes a synthetic dbt project and returns its root.
 func generateProject(tb testing.TB, models, columns, depth int) string {
 	tb.Helper()
 	root := tb.TempDir()
@@ -154,8 +149,8 @@ func generateProject(tb testing.TB, models, columns, depth int) string {
 		FQN: []string{"bench", "raw_source"}, Columns: rootCols,
 	}
 
-	// A chain of `depth` models, then the remaining models fan out from the end
-	// of the chain, so most nodes have several generations above them.
+	// A chain of `depth` models, then a fan-out, so most nodes have several
+	// generations above them.
 	previous := rootID
 	chain := make([]string, 0, depth)
 	for d := 0; d < depth && d < models; d++ {
@@ -183,16 +178,15 @@ func generateProject(tb testing.TB, models, columns, depth int) string {
 			FQN: []string{"bench", name}, Columns: map[string]jsonColumn{},
 		}
 		n.DependsOn.Nodes = []string{previous}
-		// Give a share of the models a second parent so the graph has real
-		// diamonds rather than being one long chain.
+		// A share of the models get a second parent, so the graph has real diamonds.
 		if i%4 == 0 && len(chain) > 1 {
 			n.DependsOn.Nodes = append(n.DependsOn.Nodes, chain[i%len(chain)])
 		}
 		nodes[id] = n
 	}
 
-	// The catalog knows every column of every relation; nothing but the root is
-	// documented, so every model has something to inherit.
+	// The catalog knows every column; nothing but the root is documented, so every
+	// model has something to inherit.
 	for id, n := range nodes {
 		cols := map[string]any{}
 		for i, name := range colNames {
@@ -208,8 +202,8 @@ func generateProject(tb testing.TB, models, columns, depth int) string {
 		"metadata": map[string]any{"project_name": "bench", "dbt_version": "1.10.0", "adapter_type": "duckdb"},
 		"nodes":    nodes,
 		"sources":  map[string]any{},
-		// Ballast: a real manifest is mostly things dbt-ditto skips, and the
-		// benchmark should pay the cost of skipping them.
+		// Ballast: a real manifest is mostly things dbt-ditto skips, and the benchmark
+		// should pay the cost of skipping them.
 		"macros":    ballast(models),
 		"child_map": ballast(models),
 		"docs":      ballast(models),
@@ -248,8 +242,7 @@ func writeJSON(tb testing.TB, path string, v any) {
 	}
 }
 
-// BenchmarkLoadManifest isolates artifact reading, which dominates a run on a
-// project of any size.
+// BenchmarkLoadManifest isolates artifact reading, which dominates a real run.
 func BenchmarkLoadManifest(b *testing.B) {
 	for _, shape := range benchShapes {
 		b.Run(shape.name, func(b *testing.B) {

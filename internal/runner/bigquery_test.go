@@ -11,14 +11,12 @@ import (
 )
 
 // dbt-ditto never connects to a warehouse, so covering BigQuery means covering
-// the shape of the artifacts dbt-bigquery writes. testdata/bigquery holds a
-// manifest and catalog built to match what that adapter actually emits; see the
-// README there for where each detail comes from.
+// the shape of the artifacts dbt-bigquery writes; testdata/bigquery holds a
+// matching manifest and catalog, with provenance in the README there.
 //
-// The thing that makes BigQuery different from DuckDB, and the reason these
-// tests exist: its catalog reports a nested RECORD as the parent column *and*
-// every dotted leaf, because the catalog query joins through
-// COLUMN_FIELD_PATHS. A tool that expands struct types without checking would
+// What makes BigQuery different from DuckDB: its catalog reports a nested
+// RECORD as the parent column *and* every dotted leaf, because the query joins
+// through COLUMN_FIELD_PATHS. Expanding struct types without checking would
 // write every nested field twice.
 
 func bigQueryProject(t *testing.T) string {
@@ -225,8 +223,7 @@ func TestBigQuerySourceIsBackfilledFromTheStagingModel(t *testing.T) {
 }
 
 // dbt-osmosis rebuilds each column entry and always ends it with the config
-// block. A column that already had a config block and is now gaining a
-// data_type must not end up with the two the other way round.
+// block, so a column gaining a data_type must not end up with the two swapped.
 func TestBigQueryConfigBlockStaysLast(t *testing.T) {
 	doc := runBigQuery(t, nil)["models/staging/_stg_customers.yml"]
 
@@ -241,9 +238,8 @@ func TestBigQueryConfigBlockStaysLast(t *testing.T) {
 	}
 }
 
-// A second run must change nothing, which on BigQuery is the real test that
-// nested fields are handled consistently: an unstable expansion would add a
-// duplicate on every run.
+// A second run must change nothing, which on BigQuery is the real test of
+// nested fields: an unstable expansion would add a duplicate every run.
 func TestBigQueryRunIsIdempotent(t *testing.T) {
 	root := bigQueryProject(t)
 	cfg := bigQueryConfig(root)

@@ -8,14 +8,8 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// TargetSchemaPath returns the repo-relative YAML path a node should be
-// documented in, according to the path template configured for it. It returns
-// ok=false when no template applies, in which case the node stays wherever it
-// is already documented.
-//
-// Templates match dbt-osmosis: a template starting with "/" is resolved against
-// the model root (e.g. `models/`), anything else against the model's own
-// directory.
+// TargetSchemaPath returns the repo-relative YAML path a node should be documented in,
+// or ok=false when no template applies, in which case the node stays where it is.
 func TargetSchemaPath(n *dbt.Node) (string, bool) {
 	if n.IsSource() || n.Project == nil {
 		return "", false

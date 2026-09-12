@@ -10,8 +10,7 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// MetaEntry is one key of a column's `meta`, kept in a slice rather than a map
-// so the order the analyst wrote survives a round trip.
+// MetaEntry is one key of a column's `meta`, kept ordered as the analyst wrote it.
 type MetaEntry struct {
 	Key   string
 	Value any
@@ -24,8 +23,7 @@ type ColumnDoc struct {
 	// Existing is true when the column is already present in the YAML file.
 	Existing bool
 
-	// Description is the final description. SetDescription is false when the
-	// column should keep whatever it already has.
+	// SetDescription is false when the column keeps whatever it already has.
 	Description    string
 	SetDescription bool
 
@@ -35,12 +33,10 @@ type ColumnDoc struct {
 	// Meta and Tags are the complete desired sets, in write order.
 	Meta []MetaEntry
 	Tags []string
-	// Extra are the column keys this tool does not model but was asked to carry
-	// (`inheritance.extra_keys`), in the order they were configured.
+	// Extra are unmodelled keys carried via `inheritance.extra_keys`, in config order.
 	Extra []MetaEntry
 
-	// Progenitor is the unique_id the description came from, empty when the
-	// description was already local.
+	// Progenitor is the unique_id the description came from; empty when local.
 	Progenitor string
 }
 
@@ -58,22 +54,18 @@ type NodeDoc struct {
 	Columns []ColumnDoc
 	// Drop lists YAML column names that no longer exist in the warehouse.
 	Drop []string
-	// Warnings are things worth telling the analyst that are not errors: a
-	// directive that points nowhere, or a column several parents disagree about.
+	// Warnings are non-fatal: a dangling directive, or parents that disagree.
 	Warnings []Warning
 }
 
 // Warning kinds.
 const (
-	// WarnAmbiguous: several parents document the column differently, so which
-	// description wins is decided by unique_id order and is arbitrary.
+	// WarnAmbiguous: parents disagree, so unique_id order picks the winner.
 	WarnAmbiguous = "ambiguous"
 	// WarnDirective: an `Inherited: model.column` pointer could not be resolved.
 	WarnDirective = "directive"
-	// WarnShadowedSource: a `source:` points at a relation a loaded project
-	// builds. Declared as a cross-project ref it would inherit documentation
-	// through the graph; declared as a source it is a root, and inherits
-	// nothing.
+	// WarnShadowedSource: a `source:` shadows a relation a loaded project builds,
+	// so it is a graph root and inherits nothing.
 	WarnShadowedSource = "shadowed_source"
 )
 
@@ -104,16 +96,15 @@ type Resolver struct {
 	Graph *Graph
 	Cfg   config.Resolved
 
-	// Definitives are the settled descriptions, keyed by folded column name.
-	// Build them with BuildDefinitives, which also reports conflicts.
+	// Definitives are settled descriptions keyed by folded column name; see
+	// BuildDefinitives, which also reports conflicts.
 	Definitives map[string]Definitive
 
 	matchOnce sync.Once
 	match     *matcher
 }
 
-// matcher returns the column matcher, built on first use so a zero Resolver
-// still works.
+// matcher builds the column matcher on first use, so a zero Resolver works.
 func (r *Resolver) matcher() *matcher {
 	r.matchOnce.Do(func() { r.match = newMatcher(r.Cfg) })
 	return r.match
@@ -135,19 +126,16 @@ type Existing struct {
 	Columns     []ExistingColumn
 }
 
-// knowledge is the accumulated view of one column while walking its ancestors,
-// mirroring dbt-osmosis' "column knowledge graph" entry.
+// knowledge accumulates one column's view while walking ancestors, mirroring
+// dbt-osmosis' "column knowledge graph" entry.
 type knowledge struct {
 	description string
 	meta        *dbt.OrderedMap
 	tags        []string
-	// extra holds the values of `inheritance.extra_keys`, which travel exactly
-	// as meta does: an ancestor's value overwrites what the column had.
+	// extra holds `inheritance.extra_keys` values; they travel exactly as meta does.
 	extra map[string]any
-	// notes are warnings raised while folding ancestors in — a label that was
-	// not carried across, or one two ancestors disagree about. They are
-	// collected here because inheritInto walks the generations and Resolve owns
-	// the node's warning list.
+	// notes are warnings raised while folding ancestors in (labels dropped or
+	// disagreed about); inheritInto walks generations, Resolve owns the list.
 	notes []Warning
 }
 
@@ -177,12 +165,10 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		existingByKey[r.fold(existing.Columns[i].Name)] = &existing.Columns[i]
 	}
 
-	// truth is the column list to write. haveTruth says whether it came from the
-	// warehouse, which is the only thing that licenses deleting a column.
+	// haveTruth says the list is warehouse truth, which alone licenses deletion.
 	truth, haveTruth := r.trueColumns(n)
 	if len(truth) == 0 {
-		// Nothing known about the relation at all: enrich what the file already
-		// lists and add nothing.
+		// Nothing known about the relation: enrich what the file lists, add nothing.
 		for _, c := range existing.Columns {
 			truth = append(truth, columnTruth{name: c.Name})
 		}
@@ -211,15 +197,13 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 
 		k := r.seedKnowledge(n, t.name, ex)
 		if k.description == "" && t.comment != "" && r.useComment(n, t.name, ex) {
-			// The warehouse's own comment counts as the column's documentation,
-			// so inheritance treats it exactly like a description written by
-			// hand: it is kept, and nothing upstream overwrites it.
+			// A warehouse comment counts as hand-written documentation: it is kept,
+			// and nothing upstream overwrites it.
 			k.description = t.comment
 		}
 		local := k.description
 
-		// A directive is not a description, it is an instruction about where the
-		// description lives. Resolve it before anything else looks at the text.
+		// A directive says where the description lives; resolve it first.
 		directive, hasDirective := parseDirective(local, r.Cfg.DirectivePrefix, r.Cfg.Directives)
 		var directiveDesc, directiveFrom string
 		if hasDirective {
@@ -240,12 +224,10 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 		definitive, settled := r.definitiveFor(t.name)
 		if settled {
-			// The disagreement has been decided in writing, so it is no longer
-			// something to tell the analyst about.
+			// Decided in writing, so no longer worth reporting.
 			competing = nil
 		}
-		// competing is also computed for the meta annotation below, so the
-		// warning stays gated on its own switch.
+		// competing also feeds the meta annotation below, so gate the warning here.
 		if len(competing) > 0 && r.Cfg.WarnAmbiguous {
 			doc.Warnings = append(doc.Warnings, Warning{
 				Node: n.UniqueID, Column: t.name, Kind: WarnAmbiguous,
@@ -255,33 +237,25 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 
 		if k.description == "" && r.backfills(n) {
-			// Still nothing: look downstream. Only an empty description is
-			// filled this way, so backfill can never overwrite anything.
+			// Still nothing: look downstream. Only empty descriptions are filled.
 			if desc, from, ok := r.backfill(n, t.name); ok {
 				k.description, progenitor = desc, from
 			}
 		}
 
-		// A column keeps its own description whenever it has one; only an
-		// empty description inherits. The description written back is the
-		// manifest's, so a `{{ doc(...) }}` reference lands rendered, which is
-		// what dbt-osmosis writes.
+		// A column keeps its own description; only an empty one inherits.
 		final := k.description
 		if !r.Cfg.Force && local != "" {
 			final, progenitor = local, ""
 		}
-		// A resolved directive outranks everything, including `force`: it is the
-		// analyst naming the column to copy from, which no rule should override.
+		// A resolved directive outranks everything, including `force`.
 		if directiveDesc != "" {
 			final, progenitor = directiveDesc, directiveFrom
 		}
 
-		// A definitive declaration outranks even that. The column that carries
-		// the marker is the decision itself, so it keeps its own wording and
-		// inherits nothing; every other column of that name takes the settled
-		// wording, whether it is upstream, downstream or in another project.
-		// Nothing about it is ambiguous any more, so the disagreement that
-		// prompted the declaration stops being reported.
+		// A definitive outranks even that: the marked column is the decision, so it
+		// keeps its wording; every other column of that name takes the settled one,
+		// and the disagreement that prompted it stops being reported.
 		if settled {
 			if r.declaresDefinitive(n, t.name) {
 				final, progenitor = local, ""
@@ -303,10 +277,8 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 
 		if r.Cfg.AmbiguityMeta && r.Cfg.AmbiguityKey != "" {
-			// Annotate only a description that was actually inherited while the
-			// parents disagreed. Settling it locally or with a directive clears
-			// `progenitor`, and the stale annotation is deleted rather than left
-			// behind claiming a disagreement that no longer decides anything.
+			// Annotate only descriptions actually inherited under disagreement;
+			// settling locally clears `progenitor`, so drop the stale annotation.
 			if len(competing) > 0 && progenitor != "" {
 				k.meta.Set(r.Cfg.AmbiguityKey, append([]string(nil), competing...))
 			} else {
@@ -343,10 +315,8 @@ func (r *Resolver) backfills(n *dbt.Node) bool {
 	return !r.Cfg.BackfillSourcesOnly || n.IsSource()
 }
 
-// backfill finds a description for a column among the node's descendants,
-// nearest generation first, and returns the node it came from. It stops at the
-// first real description, not the first descendant that has the column: a
-// staging model usually selects a source column through undocumented.
+// backfill finds a description among descendants, nearest generation first, and returns
+// the node it came from.
 func (r *Resolver) backfill(n *dbt.Node, name string) (string, string, bool) {
 	m := r.matcher()
 	keys := m.keysFor(name)
@@ -364,11 +334,7 @@ func (r *Resolver) backfill(n *dbt.Node, name string) (string, string, bool) {
 	return "", "", false
 }
 
-// useComment reports whether a warehouse comment may be used as a column's
-// description. dbt-osmosis reads it only when it invents the column entry, so
-// an already-written column keeps whatever the YAML says, even nothing; that is
-// the default. `columns.comments: always` also fills an existing but
-// undocumented column.
+// useComment reports whether a warehouse comment may be a column's description.
 func (r *Resolver) useComment(n *dbt.Node, name string, ex *ExistingColumn) bool {
 	switch r.Cfg.WarehouseComments {
 	case config.WarehouseCommentsNever:
@@ -380,10 +346,7 @@ func (r *Resolver) useComment(n *dbt.Node, name string, ex *ExistingColumn) bool
 	return ex == nil && n.Column(name, r.Cfg.CaseInsensitive) == nil
 }
 
-// seedKnowledge starts a column's knowledge entry from what the node itself
-// knows. The manifest is preferred over the YAML because dbt has already
-// rendered `{{ doc(...) }}` references there, which is the text dbt-osmosis
-// writes back.
+// seedKnowledge starts a column's knowledge from the node itself.
 func (r *Resolver) seedKnowledge(n *dbt.Node, name string, ex *ExistingColumn) knowledge {
 	k := knowledge{meta: dbt.NewOrderedMap()}
 	if mc := n.Column(name, r.Cfg.CaseInsensitive); mc != nil {
@@ -405,14 +368,8 @@ func (r *Resolver) seedKnowledge(n *dbt.Node, name string, ex *ExistingColumn) k
 	return k
 }
 
-// inheritInto folds every ancestor generation into k, furthest first, and
-// returns the unique_id the surviving description came from.
-//
-// The second return value names ancestors in the winner's own generation that
-// documented the column differently. Within a generation the first ancestor by
-// unique_id claims it, so that disagreement is settled alphabetically — which
-// is arbitrary, and worth saying out loud. A nearer generation overriding a
-// further one is inheritance working, and is not reported.
+// inheritInto folds every ancestor generation into k, furthest first, and returns the
+// unique_id the surviving description came from.
 func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name string) (string, []string) {
 	progenitor := ""
 	var competing []string
@@ -424,8 +381,8 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			if !ok {
 				continue
 			}
-			// First ancestor in this generation with the column claims it; the
-			// rest of the generation is skipped, as dbt-osmosis does.
+			// First ancestor in the generation with the column claims it; the rest
+			// of the generation is skipped, as dbt-osmosis does.
 			if r.Cfg.InheritTags {
 				k.tags = dbt.UnionTags(k.tags, c.EffectiveTags())
 			}
@@ -442,18 +399,14 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			if r.Cfg.InheritMeta {
 				labelKey := r.labelKey()
 				for _, mk := range c.EffectiveMeta().Keys() {
-					// An ancestor's own annotations describe that ancestor's column,
-					// not this one: the progenitor is recomputed below, an upstream
-					// disagreement was settled upstream, and the definitive marker
-					// names the one column that *is* the decision.
+					// An ancestor's annotations describe its own column, not this one.
 					if r.Cfg.SkipMetaKeys[mk] || mk == r.Cfg.ProgenitorKey ||
 						mk == r.Cfg.AmbiguityKey || mk == DefinitiveKey {
 						continue
 					}
 					v, _ := c.EffectiveMeta().Get(mk)
 					if labelKey != "" && mk == labelKey {
-						// Labels travel under their own rules: they say what may be
-						// done with the data, not what it means.
+						// Labels travel under their own rules: what may be done, not meaning.
 						if !r.carryLabels(k, a, generations[i][j+1:], name, keys, rank, v) {
 							continue
 						}
@@ -465,8 +418,7 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 				k.description = c.Description
 				progenitor = a.UniqueID
 				competing = r.dissenters(generations[i][j+1:], name, keys, c.Description)
-				// Carry the original progenitor forward rather than pointing at
-				// the intermediate model that also inherited the description.
+				// Carry the original progenitor forward, not the intermediate model.
 				if m := c.EffectiveMeta(); m != nil {
 					if p, ok := m.Get(r.Cfg.ProgenitorKey); ok {
 						if s, ok := p.(string); ok && s != "" {
@@ -481,8 +433,8 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 	return progenitor, competing
 }
 
-// dissenters names the ancestors in the rest of a generation that document the
-// column, but not the way the winner does.
+// dissenters names ancestors in the rest of a generation that document the
+// column differently from the winner.
 func (r *Resolver) dissenters(rest []*dbt.Node, name string, keys [matchNone][]string, won string) []string {
 	if !r.Cfg.WarnAmbiguous && !r.Cfg.AmbiguityMeta {
 		return nil
@@ -502,10 +454,7 @@ func (r *Resolver) dissenters(rest []*dbt.Node, name string, keys [matchNone][]s
 	return out
 }
 
-// parseDirective reads `Inherited: model.column` out of a description. The node
-// reference may be a bare name or a full unique_id; the column is whatever
-// follows the last dot, so a struct field has to be written with the node as a
-// unique_id to stay unambiguous.
+// parseDirective reads `Inherited: model.column` out of a description.
 func parseDirective(description, prefix string, enabled bool) (string, bool) {
 	if !enabled || prefix == "" {
 		return "", false
@@ -521,11 +470,7 @@ func parseDirective(description, prefix string, enabled bool) (string, bool) {
 	return target, true
 }
 
-// followDirective resolves a directive to a description and the node it came
-// from. The third return value is a human-readable reason when it cannot be
-// resolved, in which case the directive text is left in the file: silently
-// dropping it would lose the analyst's instruction, and silently keeping it
-// without a word would look like documentation.
+// followDirective resolves a directive to a description and its node.
 func (r *Resolver) followDirective(target string) (string, string, string) {
 	dot := strings.LastIndexByte(target, '.')
 	ref, column := target[:dot], target[dot+1:]
@@ -548,10 +493,8 @@ func (r *Resolver) followDirective(target string) (string, string, string) {
 }
 
 func (r *Resolver) resolveNodeLevel(n *dbt.Node, existing Existing, doc *NodeDoc) {
-	// A source's own description, when the YAML has none and the node does.
-	// For every other node the two agree, since the node's description came from
-	// that YAML — so this fires only for a source provider reporting what the
-	// warehouse says the table is. Not inheritance: the table describes itself.
+	// A source's own description, when the YAML has none and the node does: only a
+	// source provider can report one. Not inheritance, the table describes itself.
 	if n.IsSource() && existing.Description == "" && n.Description != "" &&
 		!r.Cfg.IsPlaceholder(n.Description) {
 		doc.Description, doc.SetDescription = n.Description, true
@@ -581,28 +524,20 @@ func (r *Resolver) resolveNodeLevel(n *dbt.Node, existing Existing, doc *NodeDoc
 type columnTruth struct {
 	name     string
 	dataType string
-	// comment is the warehouse's own description of the column: a Snowflake or
-	// BigQuery COMMENT, say. For a source table nothing upstream can supply a
-	// description, so this is often the only documentation that exists.
+	// comment is the warehouse's own COMMENT, often a source table's only doc.
 	comment string
 	index   int
 }
 
-// trueColumns returns the authoritative column list for a node: the catalog if
-// `dbt docs generate` has been run, otherwise whatever the manifest knows. The
-// second return value reports whether the list really is warehouse truth, which
-// is what licenses removing columns.
+// trueColumns returns a node's authoritative column list: the catalog if `dbt docs
+// generate` ran, else the manifest.
 func (r *Resolver) trueColumns(n *dbt.Node) ([]columnTruth, bool) {
 	if n.Project != nil && n.Project.Catalog != nil {
 		if cn, ok := n.Project.Catalog.Lookup(n); ok {
 			cols := cn.Ordered()
 			out := make([]columnTruth, 0, len(cols))
 
-			// BigQuery's catalog joins through COLUMN_FIELD_PATHS, so both
-			// `profile` and `profile.first_name` arrive as columns; DuckDB
-			// reports only `profile`, with the fields inside its composite type.
-			// Expanding blindly would duplicate every BigQuery field, so anything
-			// the catalog already names is left alone.
+			// BigQuery reports both `profile` and `profile.first_name`; DuckDB only `profile`.
 			known := make(map[string]bool, len(cols))
 			for _, c := range cols {
 				known[r.fold(c.Name)] = true
@@ -684,8 +619,7 @@ func entries(m *dbt.OrderedMap) []MetaEntry {
 	return out
 }
 
-// definitiveFor returns the settled description for a column name, if one has
-// been declared anywhere in the graph.
+// definitiveFor returns the settled description for a column name, if declared.
 func (r *Resolver) definitiveFor(name string) (Definitive, bool) {
 	if len(r.Definitives) == 0 {
 		return Definitive{}, false
@@ -694,8 +628,8 @@ func (r *Resolver) definitiveFor(name string) (Definitive, bool) {
 	return d, ok
 }
 
-// declaresDefinitive reports whether this node's own column carries the marker,
-// which is what makes it the source of the decision rather than a recipient.
+// declaresDefinitive reports whether this node's column carries the marker,
+// making it the decision rather than a recipient.
 func (r *Resolver) declaresDefinitive(n *dbt.Node, name string) bool {
 	c := n.Column(name, r.Cfg.CaseInsensitive)
 	return c != nil && isDefinitive(c)
@@ -708,8 +642,8 @@ func (r *Resolver) fold(s string) string {
 	return s
 }
 
-// Fold exposes the column-name folding this resolver matches with, so
-// definitives are keyed exactly the way lookups will read them.
+// Fold exposes the resolver's column-name folding, so definitives are keyed
+// exactly the way lookups read them.
 func (r *Resolver) Fold(s string) string { return r.fold(s) }
 
 func (r *Resolver) applyCase(s string) string {

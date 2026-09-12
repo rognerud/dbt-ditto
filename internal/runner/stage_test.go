@@ -13,17 +13,12 @@ import (
 
 // A stage is the smallest dbt project that can show every setting doing its
 // job: a documented seed, a model inheriting from it, a second seed that
-// disagrees with the first, an undocumented source with a documented model
-// below it, and a catalog that knows about columns the YAML does not.
-//
-// Settings tests build one, mutate the part they are about, write it to a temp
-// directory and run over it twice — once with the setting at its default, once
-// with it changed.
+// disagrees, an undocumented source with a documented model below it, and a
+// catalog that knows about columns the YAML does not.
 type stage struct {
 	name       string
 	dbtVersion string
-	// projectYAML is dbt_project.yml. The path template is left out by default,
-	// so nothing moves unless a case asks for it.
+	// projectYAML is dbt_project.yml, with the path template left out by default.
 	projectYAML string
 	nodes       map[string]any
 	sources     map[string]any
@@ -112,8 +107,8 @@ func columnMap(cols []map[string]any) map[string]any {
 	return out
 }
 
-// catalogNode builds a catalog entry. Columns are given as name/type pairs in
-// the order the warehouse reports them; a third element sets the comment.
+// catalogNode builds a catalog entry from name/type pairs in warehouse order;
+// a third element sets the comment.
 func catalogNode(cols ...[3]string) map[string]any {
 	out := map[string]any{}
 	for i, c := range cols {
@@ -129,8 +124,8 @@ func catalogNode(cols ...[3]string) map[string]any {
 	}
 }
 
-// newStage is the shared fixture. Read the assertions in settings_test.go
-// alongside it: every column here exists to make one setting visible.
+// newStage is the shared fixture: every column here exists to make one setting
+// visible, so read settings_test.go alongside it.
 func newStage() *stage {
 	s := &stage{
 		name:       "demo",
@@ -144,9 +139,7 @@ func newStage() *stage {
 		raw:     map[string]string{},
 	}
 
-	// The documented root. `id` carries meta and tags so their inheritance is
-	// observable; `raw_alt` documents `id` differently, which is the ambiguity
-	// every ambiguity setting is about.
+	// The documented root.
 	s.nodes["seed.demo.raw"] = seedNode("raw",
 		column("id", "Identifier of the row.",
 			withColMeta(map[string]any{"owner": "platform", "pii": true}),
@@ -158,8 +151,8 @@ func newStage() *stage {
 		column("id", "A different wording for the same column."),
 	)
 
-	// The model under test: one column to inherit into, one documented locally,
-	// and a catalog that knows about columns the YAML has never listed.
+	// The model under test: one column to inherit into, one documented locally, and
+	// a catalog that knows about columns the YAML has never listed.
 	s.nodes["model.demo.stg"] = modelNode("stg", "models/_stg.yml",
 		[]string{"seed.demo.raw", "seed.demo.raw_alt"},
 		column("ID", ""),
@@ -177,8 +170,7 @@ func newStage() *stage {
 		"      - name: legacy\n        description: Written by hand, and gone from the warehouse.\n"
 
 	// An undocumented source with a documented model below it: the only thing
-	// backfill can reach, and the only place a warehouse comment is the sole
-	// documentation in existence.
+	// backfill can reach, and the only place a warehouse comment is the sole doc.
 	s.sources["source.demo.crm.orders"] = sourceNode("crm", "orders", "models/_sources.yml",
 		column("order_id", ""),
 	)
@@ -192,8 +184,8 @@ func newStage() *stage {
 	s.files["models/_stg_orders.yml"] = "version: 2\nmodels:\n  - name: stg_orders\n    columns:\n" +
 		"      - name: order_id\n        description: Identifier of an order.\n"
 
-	// A model whose own column is documented only by a model below it, so
-	// backfill's sources_only switch has something to be about.
+	// A model documented only by a model below it, so backfill's sources_only
+	// switch has something to be about.
 	s.nodes["model.demo.mid"] = modelNode("mid", "models/_mid.yml",
 		[]string{"seed.demo.raw"},
 		column("mid_only", ""),
@@ -290,8 +282,8 @@ func writeFile(t *testing.T, path, body string) {
 	}
 }
 
-// snapshot is everything a run is observable by: the YAML it left behind, the
-// warnings it printed, and the notes made while loading the config.
+// snapshot is everything a run is observable by: the YAML, the warnings and the
+// notes made while loading the config.
 type snapshot struct {
 	files    map[string]string
 	warnings []string
@@ -299,8 +291,7 @@ type snapshot struct {
 	scanned  int
 }
 
-// equal reports whether two runs are indistinguishable. A setting that changes
-// nothing here is a setting that does nothing.
+// equal reports whether two runs are indistinguishable.
 func (s snapshot) equal(other snapshot) bool {
 	return s.render() == other.render()
 }
@@ -343,18 +334,15 @@ func runStage(t *testing.T, dir string, cfg *config.Config) snapshot {
 	return runStageWith(t, dir, cfg, runner.Options{Organize: true})
 }
 
-// runStageWith is runStage with the run options spelled out, for the settings
-// that only mean anything under a particular one — refreshing source providers,
-// say, which an ordinary run never does.
+// runStageWith is runStage with the run options spelled out.
 func runStageWith(t *testing.T, dir string, cfg *config.Config, opts runner.Options) snapshot {
 	t.Helper()
 	rep, err := runner.Run(cfg, opts)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	// Notes name paths, and a temp directory differs between two runs of the
-	// same case, which would make every comparison report a difference that is
-	// only the directory.
+	// Notes name paths, and a temp directory differs between runs, which would make
+	// every comparison report that difference.
 	notes := make([]string, 0, len(cfg.Notes)+len(rep.Notes))
 	for _, n := range append(append([]string{}, cfg.Notes...), rep.Notes...) {
 		notes = append(notes, strings.ReplaceAll(n, dir, "<dir>"))

@@ -7,12 +7,11 @@ import (
 )
 
 // The propagation settings are about what happens to a label as a column
-// changes shape on its way downstream, so each needs a model that reads the
-// external source and renames its column in one particular way.
+// changes shape downstream, so each needs a model that reads the external
+// source and renames its column in one particular way.
 
-// stageWithPackedSourceColumn puts a model below the source whose column is the
-// same data in a struct: `order.order_id` packed from `order_id`. Nothing about
-// the value changed, so a classification true of one is true of the other.
+// stageWithPackedSourceColumn puts a model below the source holding the same data in a
+// struct: `order.order_id` packed from `order_id`.
 func stageWithPackedSourceColumn(t *testing.T) (string, *config.Config) {
 	t.Helper()
 	s := newStage()
@@ -28,9 +27,7 @@ func stageWithPackedSourceColumn(t *testing.T) (string, *config.Config) {
 	return dir, stageConfig(dir)
 }
 
-// stageWithAggregatedSourceColumn puts a model below the source whose column is
-// an aggregate: `total_order_id`. The description still applies; the value the
-// label classified does not survive being summed.
+// stageWithAggregatedSourceColumn puts an aggregate below the source: `total_order_id`.
 func stageWithAggregatedSourceColumn(t *testing.T) (string, *config.Config) {
 	t.Helper()
 	s := newStage()
@@ -46,12 +43,8 @@ func stageWithAggregatedSourceColumn(t *testing.T) (string, *config.Config) {
 	return dir, stageConfig(dir)
 }
 
-// stageWithConflictingLabels puts two sources in one generation that label the
-// same column differently, which is the disagreement `on_conflict` is about.
-//
-// Both are external, so both get their labels from a provider; the model below
-// reads both, so the two arrive in the same generation and the winner would
-// otherwise be whichever unique_id sorts first.
+// stageWithConflictingLabels puts two sources in one generation that label the same
+// column differently — the disagreement `on_conflict` is about.
 func stageWithConflictingLabels(t *testing.T) (string, *config.Config) {
 	t.Helper()
 	s := newStage()
@@ -78,8 +71,7 @@ func stageWithConflictingLabels(t *testing.T) (string, *config.Config) {
 	return dir, stageConfig(dir)
 }
 
-// providerStage is the shared stage with one provider configured. Providers are
-// only ever spawned by a refresh, so every case using this sets refresh.
+// providerStage is the shared stage with one provider configured.
 func providerStage(t *testing.T, command string) (string, *config.Config) {
 	t.Helper()
 	dir := newStage().write(t, t.TempDir())

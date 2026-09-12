@@ -6,8 +6,7 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// at places a node in a warehouse location. The test helpers build nodes
-// without one, and classification is entirely about the relation.
+// at places a node in a warehouse location; classification is all relation.
 func at(n *dbt.Node, database, schema string) *dbt.Node {
 	n.Database, n.Schema = database, schema
 	return n
@@ -41,8 +40,8 @@ func TestSourceNoProjectBuildsIsExternal(t *testing.T) {
 }
 
 func TestSourceBuiltByAModelIsShadowedAndAMistake(t *testing.T) {
-	// The pre-loom pattern: rather than depending on the upstream project, the
-	// downstream one declares its output as a source.
+	// The pre-loom pattern: the downstream project declares the upstream's output
+	// as a source rather than depending on it.
 	up := project("plat")
 	attach(up, at(node("plat", "dim_customers", nil), "warehouse", "analytics"))
 
@@ -67,10 +66,8 @@ func TestSourceBuiltByAModelIsShadowedAndAMistake(t *testing.T) {
 }
 
 func TestSourceBackedByASeedIsShadowedButNotAMistake(t *testing.T) {
-	// Seeds are how a project stands up fake raw data; the source declaration is
-	// what the rest of the project reads it through. Both halves are meant to
-	// exist, so this must not produce a warning — but it is still not external,
-	// because the documentation is already in dbt.
+	// Seeds are how a project stands up fake raw data, so this must not warn — but
+	// it is still not external, because the documentation is already in dbt.
 	p := project("plat")
 	attach(p,
 		at(seed("plat", "raw_orders"), "warehouse", "raw"),
@@ -107,8 +104,7 @@ func TestSameRelationInAnotherDatabaseDoesNotShadow(t *testing.T) {
 }
 
 func TestEphemeralModelDoesNotShadow(t *testing.T) {
-	// An ephemeral model is inlined as a CTE and never materializes, so a source
-	// cannot be pointing at it and a matching name is coincidence.
+	// An ephemeral model never materializes, so a matching name is coincidence.
 	p := project("plat")
 	eph := at(node("plat", "raw_events", nil), "warehouse", "raw")
 	eph.Config = map[string]any{"materialized": "ephemeral"}
@@ -124,8 +120,8 @@ func TestEphemeralModelDoesNotShadow(t *testing.T) {
 }
 
 func TestIdentifierNotNameDecidesTheRelation(t *testing.T) {
-	// A source's `identifier:` is the table it really points at; its name is
-	// just what dbt calls it. Matching on the name would miss the shadow.
+	// A source's `identifier:` is the table it points at; matching on its dbt name
+	// would miss the shadow.
 	up := project("plat")
 	attach(up, at(node("plat", "dim_customers", nil), "warehouse", "analytics"))
 

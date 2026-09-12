@@ -1,11 +1,6 @@
 // Package features runs the Gherkin specifications in features/ against the
-// real pipeline.
-//
-// The Go tests elsewhere pin behaviour down setting by setting. These describe
-// the promises in the language an analyst would use to state them, so that the
-// behaviour a change is allowed to alter can be read without reading Go. They
-// drive runner.Run over a project written to a temporary directory, exactly as
-// the other tests do — nothing here is mocked.
+// real pipeline: the promises stated in an analyst's language, driving
+// runner.Run over a project in a temporary directory, with nothing mocked.
 package features
 
 import (
@@ -41,24 +36,21 @@ func TestFeatures(t *testing.T) {
 	}
 }
 
-// node is one manifest entry, kept alongside its id so the manifest can be
-// written in a chosen order: dbt's own node order is not deterministic, and
-// reproducing a particular order is what the manifest-order feature is about.
+// node is one manifest entry, kept with its id so the manifest can be written
+// in a chosen order — what the manifest-order feature is about.
 type node struct {
 	id     string
 	source bool
 	body   map[string]any
 }
 
-// world is the scenario's state: a project being described, and the results of
-// the runs made over it.
+// world is the scenario's state: a project, and the runs made over it.
 type world struct {
 	dir        string
 	nodes      []node
 	files      map[string]string
 	configYAML string
-	// tmp holds every directory the scenario made, so they can be removed when
-	// it ends.
+	// tmp holds every directory the scenario made, for removal when it ends.
 	tmp []string
 
 	// snapshots of the tree after each run, keyed by run order.
@@ -110,8 +102,7 @@ func (w *world) aProject() error {
 	return nil
 }
 
-// columns reads a `| column | description |` table into manifest columns, in
-// the order the table lists them.
+// columns reads a `| column | description |` table into manifest columns.
 func columns(tbl *godog.Table) (map[string]any, error) {
 	if len(tbl.Rows) == 0 {
 		return nil, fmt.Errorf("the column table is empty")
@@ -154,9 +145,7 @@ func (w *world) aSeed(name string, tbl *godog.Table) error {
 		"fqn":                []string{"demo", name},
 		"columns":            cols,
 		"depends_on":         map[string]any{"nodes": []string{}},
-		// Every seed shares one schema file, as they do in the fixture project.
-		// Sharing a file is what makes the order entries end up in observable
-		// at all, which is what the manifest-order feature is about.
+		// Every seed shares one schema file, which is what makes order observable.
 		"config": map[string]any{"dbt-osmosis": "_seeds.yml"},
 	}})
 	return nil
@@ -219,8 +208,8 @@ func (w *world) addModel(name string, deps []string, tbl *godog.Table) error {
 
 func (w *world) theFile(rel string, body *godog.DocString) error {
 	w.files[rel] = strings.TrimLeft(body.Content, "\n") + "\n"
-	// A node documented in a file has to say so, the way dbt records a
-	// patch_path, or the run would treat it as undocumented and write elsewhere.
+	// A node documented in a file has to say so, as dbt records a patch_path, or
+	// the run would treat it as undocumented and write elsewhere.
 	for i := range w.nodes {
 		if w.nodes[i].source {
 			continue
@@ -250,19 +239,15 @@ func (w *world) runReversed() error {
 	return w.execute(runner.Options{Organize: true}, true)
 }
 
-// execute writes the project out and runs the pipeline over it. Each run starts
-// from the described project rather than from the previous run's output, except
-// that a scenario asking for a second run in check mode is asking about the
-// tree the first run left behind — so the files are only reset when the project
-// has not been run yet.
+// execute writes the project out and runs the pipeline over it.
 func (w *world) execute(opts runner.Options, reverse bool) error {
 	if len(w.runs) == 0 {
 		if err := w.writeProject(reverse); err != nil {
 			return err
 		}
 	} else if reverse {
-		// A reversed run is a run over the same project as described by a
-		// differently ordered manifest, so it needs its own copy of the tree.
+		// A reversed run describes the same project with a differently ordered
+		// manifest, so it needs its own copy of the tree.
 		w.dir = w.tempDir()
 		if err := w.writeProject(true); err != nil {
 			return err
@@ -288,8 +273,7 @@ func (w *world) execute(opts runner.Options, reverse bool) error {
 	return nil
 }
 
-// config assembles the dbt_ditto.yml the scenario asked for, if any, and loads
-// it the way the CLI would.
+// config assembles the dbt_ditto.yml the scenario asked for and loads it.
 func (w *world) config() (*config.Config, error) {
 	if w.configYAML == "" {
 		return config.Default(w.dir), nil
@@ -326,8 +310,8 @@ func (w *world) writeProject(reverse bool) error {
 	return w.writeManifest(reverse)
 }
 
-// writeManifest emits manifest.json with the nodes in a chosen order. The order
-// matters and a Go map has none, so the JSON object is assembled by hand.
+// writeManifest emits manifest.json in a chosen node order, assembled by hand
+// because a Go map has none.
 func (w *world) writeManifest(reverse bool) error {
 	ordered := make([]node, len(w.nodes))
 	copy(ordered, w.nodes)
@@ -367,7 +351,7 @@ func (w *world) writeManifest(reverse bool) error {
 		return err
 	}
 	// An empty catalog: these scenarios are about the manifest, and a missing
-	// catalog is a legitimate state that should not change what they assert.
+	// catalog is a legitimate state.
 	catalog := `{"metadata":{"dbt_version":"1.8.0"},"nodes":{},"sources":{}}`
 	return os.WriteFile(filepath.Join(target, "catalog.json"), []byte(catalog), 0o644)
 }
@@ -453,8 +437,8 @@ func (w *world) fileDoesNotContain(rel, want string) error {
 	return nil
 }
 
-// fileLists asserts the order of the named entries in a file, which is the one
-// thing about a schema file that manifest order decides.
+// fileLists asserts the order of the named entries in a file, the one thing
+// manifest order decides.
 func (w *world) fileLists(rel string, tbl *godog.Table) error {
 	body, err := w.file(rel)
 	if err != nil {
@@ -484,11 +468,8 @@ func (w *world) fileLists(rel string, tbl *godog.Table) error {
 	return nil
 }
 
-// runsAgreeCanonically is the parity proof's own assumption, stated as a
-// behaviour: whatever order dbt listed the nodes in, canonicalising the output
-// has to leave the same bytes. scripts/parity.sh relies on it to compare
-// dbt-osmosis, which parses the project itself, against dbt-ditto, which reads
-// the recorded manifest.
+// runsAgreeCanonically is the parity proof's own assumption as a behaviour:
+// whatever order dbt listed the nodes in, canonicalising leaves the same bytes.
 func (w *world) runsAgreeCanonically() error {
 	if len(w.runs) < 2 {
 		return fmt.Errorf("two runs are needed, got %d", len(w.runs))
@@ -508,7 +489,7 @@ func (w *world) runsAgreeCanonically() error {
 }
 
 // canonical renders a snapshot with every file canonicalised, so the comparison
-// is about content rather than the order entries were appended in.
+// is about content rather than append order.
 func canonical(snap map[string]string) (string, error) {
 	dir, err := os.MkdirTemp("", "canon")
 	if err != nil {

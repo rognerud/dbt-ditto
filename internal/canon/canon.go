@@ -1,12 +1,5 @@
-// Package canon rewrites dbt schema YAML with its top-level entries sorted by
-// name, so two trees compare without the comparison depending on the order dbt
-// happened to list its nodes in.
-//
-// That order is not deterministic, and it shows in the bytes when several nodes
-// share a schema file. dbt-osmosis learns it by parsing the project, dbt-ditto
-// by reading the committed manifest.json, so comparing the two outputs raw
-// would assert an order neither tool promises. Entry order within a file is a
-// separate claim, proved against the recorded manifest.
+// Package canon rewrites dbt schema YAML with its top-level entries sorted by name, so
+// two trees compare without depending on the order dbt happened to list its nodes in.
 package canon
 
 import (
@@ -21,7 +14,6 @@ import (
 )
 
 // EntryKeys are the top-level dbt schema sequences whose entries are named and
-// whose order carries no meaning.
 var EntryKeys = []string{
 	"models", "seeds", "snapshots", "sources", "analyses", "exposures", "macros",
 }
@@ -75,10 +67,6 @@ func IsSchemaFile(name string) bool {
 }
 
 // File canonicalises one schema file, in place.
-//
-// The file is always written back, even when no entry moved: a file rewritten
-// on one side of a comparison and left as it was read on the other would
-// compare the encoder's formatting against the original bytes.
 func File(path string) error {
 	f, err := yamlfile.Load(path)
 	if err != nil {
@@ -110,8 +98,6 @@ func Document(f *yamlfile.File) {
 }
 
 // sortByName orders a sequence of `name:`-keyed mappings alphabetically.
-// Anything that is not such a mapping keeps its place relative to its
-// neighbours, which is what a stable sort on an empty key gives.
 func sortByName(seq *yaml.Node) {
 	if seq == nil || seq.Kind != yaml.SequenceNode {
 		return

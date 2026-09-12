@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""dbt-ditto source provider for BigQuery.
-
-Documents external sources from BigQuery's own metadata, using the credentials
-dbt already has in profiles.yml.
-
-    dbt-ditto inherit --refresh-sources
-
-with, in dbt_ditto.yml:
-
-    sources:
-      providers:
-        - command: "uv run --with google-cloud-bigquery packaging/providers/bigquery.py"
-
-Why `tables.get` rather than INFORMATION_SCHEMA: it is free metadata rather than
-a query job, so it needs no `jobUser` role and costs nothing, and the calls run
-in parallel. Asked about tens of external sources instead of every relation in
-the project, a refresh is a second or so — against minutes for
-`dbt docs generate`, which walks the whole project to reach the same handful.
-"""
+"""dbt-ditto source provider for BigQuery."""
 
 from __future__ import annotations
 
@@ -30,27 +12,18 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from dbt_ditto_provider import (  # noqa: E402
     Column,
     Doc,
-    Project,
     Source,
-    load_profile,
+    each_project,
     read_request,
     write_response,
 )
 
-# How many tables.get calls are in flight at once. Metadata reads are cheap and
-# the default quota is generous; this exists so a project with a thousand
-# sources does not open a thousand sockets.
+# How many tables.get calls are in flight at once.
 MAX_PARALLEL = 16
 
 
 def client_for(profile: dict[str, Any]):
-    """Build a BigQuery client from a dbt profile block.
-
-    Every authentication method dbt-bigquery supports maps onto a credentials
-    object here, so a project that already runs dbt needs no further setup. An
-    unrecognised method falls through to application default credentials, which
-    is what `method: oauth` means anyway.
-    """
+    """Build a BigQuery client from a dbt profile block."""
     from google.cloud import bigquery
 
     method = (profile.get("method") or "oauth").lower()
@@ -98,14 +71,7 @@ def client_for(profile: dict[str, Any]):
 
 
 def render_type(field) -> str:
-    """Render a field's type the way dbt-bigquery writes it into catalog.json.
-
-    A record becomes ``STRUCT<`name` TYPE, ...>`` with backtick-quoted field
-    names, and a repeated field is wrapped in ``ARRAY<...>``. Matching this
-    matters because the type dbt-ditto writes into `data_type:` should be the
-    one `dbt docs generate` would have written, or a project that runs both
-    gets a diff every time it switches.
-    """
+    """Render a field's type the way dbt-bigquery writes it into catalog.json."""
     if field.field_type in ("RECORD", "STRUCT"):
         inner = ", ".join(f"`{f.name}` {render_type(f)}" for f in field.fields)
         base = f"STRUCT<{inner}>"
@@ -122,14 +88,7 @@ def render_type(field) -> str:
 
 
 def flatten(fields, prefix: str = "", start: int = 1) -> list[Column]:
-    """Walk a BigQuery schema into the flat, dotted column list dbt reports.
-
-    dbt-bigquery's catalog query joins INFORMATION_SCHEMA.COLUMNS to
-    COLUMN_FIELD_PATHS, so a nested record arrives as the parent column *and*
-    every dotted leaf below it. Both are emitted here for the same reason: a
-    project documenting `profile.first_name` needs the leaf to exist, and one
-    documenting `profile` needs the parent.
-    """
+    """Walk a BigQuery schema into the flat, dotted column list dbt reports."""
     out: list[Column] = []
     index = start
     for f in fields:
@@ -140,9 +99,7 @@ def flatten(fields, prefix: str = "", start: int = 1) -> list[Column]:
             description=f.description or "",
             index=index,
         )
-        # Policy tags are BigQuery's access classification. They have no
-        # equivalent anywhere else, so they stay a provider concern and travel
-        # as an extra key under dbt's own spelling.
+        # Policy tags are BigQuery's access classification.
         tags = getattr(f, "policy_tags", None)
         if tags and getattr(tags, "names", None):
             column.extra["policy_tags"] = list(tags.names)
@@ -186,22 +143,7 @@ def main() -> None:
     docs: list[Doc] = []
     warnings: list[str] = []
 
-    for project_name, sources in request.by_project().items():
-        project = request.projects.get(project_name) or Project(
-            name=project_name, root="", profile="", target="", profiles_dir=""
-        )
-        try:
-            profile = load_profile(project)
-        except SystemExit as err:
-            warnings.append(f"{project_name}: {err}")
-            continue
-
-        if (profile.get("type") or "").lower() != "bigquery":
-            warnings.append(
-                f"{project_name}: profile target is {profile.get('type')!r}, not bigquery; skipped"
-            )
-            continue
-
+    for profile, sources in each_project(request, "bigquery", warnings):
         client = client_for(profile)
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
             for doc, warning in pool.map(lambda s: describe(client, s), sources):

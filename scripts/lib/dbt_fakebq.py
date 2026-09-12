@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Run the dbt CLI against a local BigQuery emulator.
-
-Unlike Snowflake, BigQuery has no in-process fake, so this points dbt at
-`bigquery-emulator` running in a container.
-
-The reason a wrapper is needed at all: the Go BigQuery client honours
-`BIGQUERY_EMULATOR_HOST`, but the Python one — which is what dbt-bigquery uses —
-does not. The endpoint has to be handed to the client explicitly, so
-`bigquery.Client` is subclassed here to inject it along with anonymous
-credentials before dbt ever constructs one.
-
-    python scripts/lib/dbt_fakebq.py http://127.0.0.1:9050 run --quiet
-"""
+"""Run the dbt CLI against a local BigQuery emulator."""
 
 from __future__ import annotations
 
@@ -36,10 +24,9 @@ def main() -> int:
         """A BigQuery client aimed at the emulator instead of Google."""
 
         def __init__(self, *args, **kwargs):
-            # The real signature is Client(project, credentials, _http,
-            # location, ...) and dbt passes the first two positionally, so
-            # adding credentials as a keyword on top of that is a TypeError.
-            # The positional slot is overwritten in place instead.
+            # The real signature is Client(project, credentials, _http, location, ...)
+            # and dbt passes the first two positionally, so adding credentials as a
+            # keyword on top of that is a TypeError.
             args = list(args)
             if len(args) >= 2:
                 args[1] = AnonymousCredentials()

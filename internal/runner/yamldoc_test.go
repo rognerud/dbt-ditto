@@ -37,9 +37,7 @@ func model(name string) *dbt.Node {
 	return &dbt.Node{UniqueID: "model.p." + name, Name: name, ResourceType: "model"}
 }
 
-// dbt >= 1.9.6 wants column meta and tags nested under `config:`; older dbt
-// wants them at the top level. Writing the wrong shape silently loses the data,
-// so both are covered.
+// dbt >= 1.9.6 wants column meta and tags under `config:`, older dbt at the top level.
 func TestColumnMetaPlacementFollowsTheConfigBlockSetting(t *testing.T) {
 	doc := &inherit.NodeDoc{Columns: []inherit.ColumnDoc{{
 		Name: "id", Description: "The key.", SetDescription: true,
@@ -69,7 +67,7 @@ func TestColumnMetaPlacementFollowsTheConfigBlockSetting(t *testing.T) {
 }
 
 // A column that already carries top-level meta must end up with it in one place
-// only when the shape changes, never in both.
+// when the shape changes, never in both.
 func TestMetaIsNotDuplicatedWhenTheShapeChanges(t *testing.T) {
 	f := newFile(t)
 
@@ -161,8 +159,7 @@ func TestDroppedColumnsGoAndUnmentionedOnesStay(t *testing.T) {
 	}
 }
 
-// The `osmosis` comment mode reproduces dbt-osmosis' loss of comments inside a
-// column list; the default keeps them.
+// The `osmosis` mode reproduces dbt-osmosis' comment loss; the default keeps them.
 func TestCommentHandlingModes(t *testing.T) {
 	build := func(comments string) string {
 		f := newFile(t)
@@ -219,8 +216,8 @@ func TestSourcesAreWrittenInTheirOwnShape(t *testing.T) {
 	}
 }
 
-// Reading meta back has to understand both shapes, so a project that has been
-// migrated between them is not seen as having lost its metadata.
+// Reading meta back understands both shapes, so a migrated project is not seen
+// as having lost its metadata.
 func TestReadExistingUnderstandsBothMetaShapes(t *testing.T) {
 	f := newFile(t)
 

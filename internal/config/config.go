@@ -1,8 +1,4 @@
-// Package config loads dbt_ditto.yml. Every default matches dbt-osmosis, with
-// one exception: inheritance.progenitor is on, so byte parity needs
-// `progenitor: false` (which scripts/parity.sh sets).
-//
-// docs/usage.md documents every key.
+// Package config loads dbt_ditto.yml.
 package config
 
 import (
@@ -15,14 +11,13 @@ import (
 
 // ProjectRef points at one dbt project on disk.
 type ProjectRef struct {
-	// Name is not configurable; dbt decides it. Filled in from a dbt-loom entry,
-	// which names a manifest before anything has read it.
+	// Name is not configurable; dbt decides it. Filled in from a dbt-loom entry.
 	Name string `yaml:"-"`
 	Path string `yaml:"path"`
 	// Target overrides the artifact directory (default <path>/target).
 	Target string `yaml:"target"`
-	// Manifest points straight at a manifest.json(.gz) with no project directory
-	// behind it, as a dbt-loom upstream arrives. Always upstream: no YAML on disk.
+	// Manifest points at a manifest.json(.gz) with no project behind it, as a
+	// dbt-loom upstream arrives. Always upstream: no YAML on disk.
 	Manifest string `yaml:"manifest"`
 	// Upstream projects donate metadata but are never written to.
 	Upstream bool `yaml:"upstream"`
@@ -37,27 +32,21 @@ type Inheritance struct {
 	CaseInsensitive *bool    `yaml:"case_insensitive"`
 	Force           *bool    `yaml:"force"`
 	Placeholders    []string `yaml:"placeholders"`
-	// Progenitor records the node a description came from under the column's
-	// meta, as dbt-osmosis' --add-progenitor-to-meta does.
+	// Progenitor records the node a description came from in the column's meta.
 	Progenitor    *bool   `yaml:"progenitor"`
 	ProgenitorKey *string `yaml:"progenitor_key"`
 	// SkipMetaKeys are meta keys never inherited (e.g. ownership).
 	SkipMetaKeys []string `yaml:"skip_meta_keys"`
-	// ExtraKeys are column keys dbt-ditto does not otherwise model but should
-	// carry down the DAG, `policy_tags` being the motivating case. dbt-osmosis
-	// calls it `add-inheritance-for-specified-keys`. Explicit rather than a
-	// catch-all: decoding every unknown key allocates a map per column.
+	// ExtraKeys are unmodelled column keys to carry down the DAG (`policy_tags`).
 	ExtraKeys []string `yaml:"extra_keys"`
-	// Directives honours `description: "Inherited: stg_customers.customer_id"`
-	// as a pointer, for columns renamed on the way down the DAG.
+	// Directives honours `description: "Inherited: model.column"` as a pointer.
 	Directives      *bool   `yaml:"directives"`
 	DirectivePrefix *string `yaml:"directive_prefix"`
-	// WarnAmbiguous reports a column that several parents document differently,
-	// where the winner is decided by unique_id order and is therefore arbitrary.
+	// WarnAmbiguous reports a column several parents document differently, where
+	// unique_id order picks the winner.
 	WarnAmbiguous *bool `yaml:"warn_ambiguous"`
-	// AmbiguityMeta records that disagreement in the column's meta, so it
-	// outlives the warning. Only an actually-inherited description is annotated,
-	// so settling the disagreement removes it. Off: dbt-osmosis writes no such meta.
+	// AmbiguityMeta records that disagreement in the column's meta, so it outlives
+	// the warning. Only an inherited description is annotated. Off for parity.
 	AmbiguityMeta *bool   `yaml:"ambiguity_meta"`
 	AmbiguityKey  *string `yaml:"ambiguity_key"`
 	// Derived matches columns whose name changed on the way down the DAG.
@@ -66,18 +55,16 @@ type Inheritance struct {
 	Backfill Backfill `yaml:"backfill"`
 }
 
-// Backfill carries documentation *up* the DAG, from a node's descendants, which
-// is the only way to document a source: a source is a root of the DAG. Strictly
-// additive — it only fills blanks.
+// Backfill carries documentation *up* the DAG from a node's descendants, the
+// only way to document a source. Strictly additive: it only fills blanks.
 type Backfill struct {
 	Enabled *bool `yaml:"enabled"`
 	// SourcesOnly limits backfill to source tables.
 	SourcesOnly *bool `yaml:"sources_only"`
 }
 
-// Derived matches a column to an upstream column it no longer shares a name
-// with: aggregated, or packed into / unpacked out of a struct. Off by default —
-// dbt-osmosis matches on name alone, and parity is the promise.
+// Derived matches a column to an upstream one it no longer shares a name with:
+// aggregated, or packed into / unpacked out of a struct. Off, for parity.
 type Derived struct {
 	Enabled *bool `yaml:"enabled"`
 	// Structs matches a struct field to the flat column it was packed from, and
@@ -97,14 +84,10 @@ type Columns struct {
 	DataTypes   *bool   `yaml:"data_types"`
 	Case        *string `yaml:"case"`  // lower | upper | preserve
 	Order       *string `yaml:"order"` // catalog | yaml | alphabetical
-	// ExpandStructs writes an entry per struct field, with dbt's dotted path
-	// (`profile.first_name`). Not an extension: adapters that understand nested
-	// data report those as columns, but catalog.json holds one composite type,
-	// so the type has to be expanded to reach the same answer.
+	// ExpandStructs writes an entry per struct field, under dbt's dotted path.
 	ExpandStructs *bool `yaml:"expand_structs"`
 	// Comments uses the warehouse column comment as the description: "new"
-	// (dbt-osmosis' behaviour), "always" or "never". Often a source table's only
-	// documentation, since nothing upstream can reach it.
+	// (dbt-osmosis' behaviour), "always" or "never".
 	Comments *string `yaml:"comments"`
 }
 
@@ -115,27 +98,20 @@ type Organize struct {
 	DeleteEmpty *bool `yaml:"delete_empty"`
 }
 
-// Output controls the shape of what is written. Whether column meta and tags
-// nest under `config:` is not a setting: the manifest's dbt version decides it
-// (>= 1.9.6 reads them there, older dbt does not read them there at all).
+// Output controls the shape of what is written.
 type Output struct {
 	// Comments: "follow" keeps each YAML comment with the column it annotates;
-	// "osmosis" reproduces dbt-osmosis, which rebuilds the column list and so
-	// keeps only the comment above the first entry.
+	// "osmosis" keeps only the comment above the first entry, as dbt-osmosis does.
 	Comments *string `yaml:"comments"`
 }
 
-// Sources documents external sources — the raw tables no loaded dbt project
-// builds — by asking an external program. A provider is a separate program so
-// the binary keeps its premise of reading artifacts off disk and connecting to
-// nothing. See docs/source-providers.md.
+// Sources documents external sources — the raw tables no loaded dbt project builds — by
+// asking a separate program, so the binary itself still connects to nothing.
 type Sources struct {
 	Providers []SourceProvider `yaml:"providers"`
-	// Strict fails the run when a provider does. Off: a tool that tidies YAML
-	// should still tidy it when BigQuery is unreachable.
+	// Strict fails the run when a provider does.
 	Strict *bool `yaml:"strict"`
-	// Cache, relative to the config file, is what keeps `--check` offline: CI
-	// reads a committed cache and spawns nothing, so it needs no credentials.
+	// Cache, relative to the config file, is what keeps `--check` offline.
 	Cache  *string `yaml:"cache"`
 	Labels Labels  `yaml:"labels"`
 }
@@ -144,8 +120,7 @@ type Sources struct {
 type SourceProvider struct {
 	// Command is run through the platform shell, from the config file's directory.
 	Command string `yaml:"command"`
-	// Match limits which sources this provider is asked about. Empty patterns
-	// match everything; the first provider to claim a source wins.
+	// Match limits which sources this provider is asked about.
 	Match SourceMatch `yaml:"match"`
 }
 
@@ -156,22 +131,18 @@ type SourceMatch struct {
 }
 
 // Labels routes the key-value metadata a provider reports (BigQuery labels,
-// Snowflake tags, Glue table parameters) into dbt's vocabulary. Mapped here
-// rather than per provider, so providers do not each invent a config for it.
+// Snowflake tags, Glue table parameters) into dbt's vocabulary, here rather
+// than per provider.
 type Labels struct {
-	// Mode: "meta" (default), "tags", "both" or "ignore". Meta, because a dbt
-	// tag is a selector: routing labels there changes what `--select tag:...`
-	// matches in a project that never asked for it.
+	// Mode: "meta" (default), "tags", "both" or "ignore".
 	Mode *string `yaml:"mode"`
-	// MetaKey nests the pairs under one meta key, which is what keeps them
-	// distinguishable from hand-written meta and so what the propagation rules
-	// depend on. Empty flattens them into meta, at the cost of those rules.
+	// MetaKey nests the pairs under one meta key, keeping them distinguishable from
+	// hand-written meta, which the propagation rules depend on.
 	MetaKey *string `yaml:"meta_key"`
-	// TagFormat renders a pair as a tag. A pair with an empty value renders as
-	// the bare key regardless: BigQuery permits valueless labels.
+	// TagFormat renders a pair as a tag. An empty value renders as the bare key.
 	TagFormat *string `yaml:"tag_format"`
-	// Include, when non-empty, is the only label keys accepted. Exclude then
-	// drops from what remains. Both match with `*` globs.
+	// Include, when non-empty, is the only keys accepted; Exclude then drops from
+	// what remains. Both match with `*` globs.
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
 
@@ -179,24 +150,15 @@ type Labels struct {
 }
 
 // LabelPropagate decides which labels travel down the DAG with the column.
-// There is deliberately no `table` key: a relation's own labels describe the
-// physical object, and node meta is not inherited by anything here.
 type LabelPropagate struct {
-	// Column labels describe the data, so they travel like a description. Off
-	// relies on the labels being nested under MetaKey, which is what makes them
-	// identifiable; labels routed to tags travel regardless, as dbt tags do.
+	// Column labels describe the data, so they travel like a description.
 	Column *bool `yaml:"column"`
-	// Structs carries labels across a struct pack/unpack match: the field holds
-	// the same bytes the flat column did.
+	// Structs carries labels across a struct pack/unpack: the same bytes, reshaped.
 	Structs *bool `yaml:"structs"`
-	// Aggregates: "inherit", "warn" (default) or "ignore". Warn, because a
-	// missing classification reads as "not restricted", which is a false claim,
-	// while the description itself still applies.
+	// Aggregates: "inherit", "warn" (default) or "ignore".
 	Aggregates *string `yaml:"aggregates"`
-	// OnConflict when one generation disagrees on a value: "warn" (default,
-	// writing nothing), "first" (lowest unique_id, as descriptions do) or
-	// "none". Descriptions break the tie arbitrarily; a classification cannot,
-	// since ranking restrictiveness needs an ordering this tool cannot learn.
+	// OnConflict when one generation disagrees on a value: "warn" (default, writing
+	// nothing), "first" (lowest unique_id, as descriptions do) or "none".
 	OnConflict *string `yaml:"on_conflict"`
 }
 
@@ -209,24 +171,19 @@ type Config struct {
 	Output      Output       `yaml:"output"`
 	Sources     Sources      `yaml:"sources"`
 
-	// Loom turns off dbt_loom.config.yml discovery, on by default so the
-	// upstream manifest list is not maintained twice.
+	// Loom reads dbt_loom.config.yml, on so the upstream list is not kept twice.
 	Loom *bool `yaml:"loom"`
 
 	Dir string `yaml:"-"`
 
-	// Notes are non-fatal remarks made while loading, such as a dbt-loom
-	// manifest this tool cannot reach. They are printed once, before the run.
+	// Notes are non-fatal remarks made while loading, printed once before the run.
 	Notes []string `yaml:"-"`
 }
 
-// Filenames searched when no explicit config path is given, in order within
-// each directory. PyprojectFilename last, so a directory holding both uses the
-// dedicated file.
+// Filenames searched when no config path is given, in order within a directory.
 var Filenames = []string{"dbt_ditto.yml", "dbt_ditto.yaml", ".dbt_ditto.yml", PyprojectFilename}
 
-// Load reads the config at path. If path is empty it searches the working
-// directory and its parents.
+// Load reads the config at path.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		found, err := discover()
@@ -259,8 +216,7 @@ func Load(path string) (*Config, error) {
 	return c, nil
 }
 
-// SourceCachePath resolves the cache against the config file's own directory,
-// so a run from anywhere reads the same file.
+// SourceCachePath resolves the cache against the config file's own directory.
 func (c *Config) SourceCachePath() string {
 	p := DefaultSourceCache
 	if c.Sources.Cache != nil && *c.Sources.Cache != "" {
@@ -275,8 +231,7 @@ func (c *Config) SourceCachePath() string {
 // DefaultSourceCache sits under `target/`, which projects already gitignore.
 const DefaultSourceCache = "target/ditto-sources.json"
 
-// Default builds a single-project config for `dbt-ditto inherit <dir>` with no
-// config file present.
+// Default builds a single-project config for `dbt-ditto inherit <dir>`.
 func Default(projectDir string) *Config {
 	abs, _ := filepath.Abs(projectDir)
 	c := &Config{
@@ -303,8 +258,7 @@ func discoverFrom(dir string) (string, error) {
 			if _, err := os.Stat(p); err != nil {
 				continue
 			}
-			// A pyproject.toml is only an answer if it carries the table;
-			// otherwise carry on upwards as if it were not there.
+			// A pyproject.toml without the table is not an answer; keep going up.
 			if isPyproject(p) && !hasPyprojectTable(p) {
 				continue
 			}
@@ -342,14 +296,13 @@ const (
 // DefaultProgenitorKey matches the meta key dbt-osmosis writes.
 const DefaultProgenitorKey = "osmosis_progenitor"
 
-// DefaultAmbiguityKey is namespaced to this tool: dbt-osmosis has no equivalent.
+// DefaultAmbiguityKey is namespaced: dbt-osmosis has no equivalent.
 const DefaultAmbiguityKey = "dbt_ditto_ambiguous"
 
-// DefaultDirectivePrefix is the marker dbt-doc-inherit uses, so a project
-// already writing these keeps working.
+// DefaultDirectivePrefix is dbt-doc-inherit's marker, so those projects work.
 const DefaultDirectivePrefix = "Inherited:"
 
-// Resolved is the config with every default filled in, so downstream code never
+// Resolved is the config with every default filled in, so nothing downstream
 // deals with nil pointers.
 type Resolved struct {
 	InheritColumns         bool
@@ -418,8 +371,8 @@ const (
 	ConflictNone  = "none"
 )
 
-// DefaultLabelMetaKey namespaces provider-reported labels inside meta, which is
-// what keeps them identifiable for the propagation rules.
+// DefaultLabelMetaKey namespaces provider labels inside meta, which is what
+// keeps them identifiable to the propagation rules.
 const DefaultLabelMetaKey = "labels"
 
 // DefaultTagFormat renders a label pair as a dbt tag.
@@ -448,14 +401,11 @@ func (l ResolvedLabels) ToMeta() bool { return l.Mode == LabelsMeta || l.Mode ==
 // ToTags reports whether labels are written as tags.
 func (l ResolvedLabels) ToTags() bool { return l.Mode == LabelsTags || l.Mode == LabelsBoth }
 
-// Nested reports whether labels are kept under their own meta key, which the
-// propagation rules depend on.
+// Nested reports whether labels are kept under their own meta key.
 func (l ResolvedLabels) Nested() bool { return l.ToMeta() && l.MetaKey != "" }
 
-// DefaultPlaceholders is dbt-osmosis' placeholder list verbatim: an upstream
-// description equal to one of these is not inherited. Comparison is exact — no
-// trimming, no case folding — because dbt-osmosis uses a plain `in`.
-// The empty string is always a placeholder.
+// DefaultPlaceholders is dbt-osmosis' list verbatim: an upstream description equal to
+// one of these is not inherited.
 var DefaultPlaceholders = []string{
 	"",
 	"Pending further documentation",
@@ -474,8 +424,8 @@ func (c *Config) Resolve() Resolved {
 		InheritTags:            boolOr(c.Inheritance.Tags, true),
 		CaseInsensitive:        boolOr(c.Inheritance.CaseInsensitive, true),
 		Force:                  boolOr(c.Inheritance.Force, false),
-		// On by default, unlike dbt-osmosis: an inherited description is the one
-		// thing in a schema file nobody wrote, so its origin is worth recording.
+		// On, unlike dbt-osmosis: an inherited description is the one line in a
+		// schema file nobody wrote, so its origin is worth recording.
 		Progenitor:        boolOr(c.Inheritance.Progenitor, true),
 		ProgenitorKey:     strOr(c.Inheritance.ProgenitorKey, DefaultProgenitorKey),
 		Directives:        boolOr(c.Inheritance.Directives, true),
@@ -537,8 +487,7 @@ func (c *Config) Resolve() Resolved {
 	r.Backfill = boolOr(c.Inheritance.Backfill.Enabled, false)
 	r.BackfillSourcesOnly = boolOr(c.Inheritance.Backfill.SourcesOnly, true)
 
-	// The master switch gates both strategies, so `derived: {enabled: true}` is
-	// enough on its own.
+	// The master switch gates both strategies, so `enabled: true` suffices.
 	if boolOr(c.Inheritance.Derived.Enabled, false) {
 		r.DerivedStructs = boolOr(c.Inheritance.Derived.Structs, true)
 		r.DerivedAggregates = boolOr(c.Inheritance.Derived.Aggregates, true)
@@ -555,8 +504,7 @@ func (c *Config) Resolve() Resolved {
 }
 
 // Words analysts put around an aggregated column name, so `total_amount_cents`
-// matches `amount_cents`. Only whole underscore-separated words are stripped,
-// so `count_of_things` stays whole.
+// matches `amount_cents`. Only whole underscore-separated words are stripped.
 var (
 	DefaultAggregatePrefixes = []string{
 		"sum", "total", "avg", "average", "mean", "median", "min", "max",
@@ -569,8 +517,8 @@ var (
 	}
 )
 
-// IsPlaceholder reports whether a description counts as undocumented and may
-// therefore be overwritten by an inherited one.
+// IsPlaceholder reports whether a description counts as undocumented, and so
+// may be overwritten by an inherited one.
 func (r Resolved) IsPlaceholder(desc string) bool { return r.Placeholders[desc] }
 
 func boolOr(p *bool, def bool) bool {

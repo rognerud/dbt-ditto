@@ -11,9 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// writeOpts is the subset of resolved configuration the YAML writer needs,
-// plus the per-project decisions that cannot live in the config (whether this
-// manifest's dbt understands column `config:` blocks).
+// writeOpts is the resolved configuration the YAML writer needs, plus the
+// per-project decisions that cannot live in the config.
 type writeOpts struct {
 	cfg         config.Resolved
 	configBlock bool
@@ -47,7 +46,6 @@ func readExisting(f *yamlfile.File, n *dbt.Node) inherit.Existing {
 }
 
 // readMeta reads `meta:` and `config.meta:` off an entry, in that order, so
-// both YAML shapes are understood on the way in.
 func readMeta(entry *yaml.Node) []inherit.MetaEntry {
 	var out []inherit.MetaEntry
 	seen := map[string]int{}
@@ -95,7 +93,6 @@ func contains(hay []string, needle string) bool {
 }
 
 // writeDoc applies a resolved NodeDoc to the destination file and returns a
-// human-readable list of what it changed.
 func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpts) []string {
 	if !doc.Changed() && findEntry(f, n) == nil && len(doc.Columns) == 0 {
 		return nil
@@ -108,8 +105,8 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 		changes = append(changes, fmt.Sprintf("description inherited from %s", doc.DescriptionFrom))
 	}
 	if len(doc.Meta) > 0 {
-		// Node-level meta keeps the classic top-level shape: dbt-osmosis only
-		// moves *column* meta into a config block.
+		// Node-level meta keeps the top-level shape: dbt-osmosis only moves *column*
+		// meta into a config block.
 		setMeta(entry, doc.Meta, false)
 		changes = append(changes, fmt.Sprintf("meta = %s", metaKeys(doc.Meta)))
 	}
@@ -150,8 +147,8 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 
 		if cd.SetDescription {
 			yamlfile.MapSet(node, "description", yamlfile.Scalar(cd.Description))
-			// A description with no progenitor was not inherited from anywhere:
-			// it is the manifest's own text being written into the file.
+			// A description with no progenitor was not inherited: it is the manifest's own
+			// text being written into the file.
 			if cd.Progenitor != "" {
 				changes = append(changes, fmt.Sprintf("%s.description inherited from %s", cd.Name, cd.Progenitor))
 			} else {
@@ -166,8 +163,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 		}
 		setMeta(node, cd.Meta, opts.configBlock)
 		setTags(node, cd.Tags, opts.configBlock)
-		// Extra keys are dbt's own column keys, so they are written where dbt
-		// reads them — beside `name`, not inside `meta` or `config`.
+		// Extra keys are dbt's own column keys, so they go where dbt reads them.
 		for _, e := range cd.Extra {
 			v, err := yamlfile.Encode(e.Value)
 			if err != nil {
@@ -175,18 +171,14 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 			}
 			yamlfile.MapSet(node, e.Key, v)
 		}
-		// dbt-osmosis rebuilds each column entry from scratch and always ends
-		// it with the config block. Editing in place instead keeps `config`
-		// wherever it already was, which puts a newly added `data_type` after
-		// it; on a project whose YAML already uses config blocks that is a
-		// gratuitous diff on the first run.
+		// dbt-osmosis rebuilds each column entry and always ends it with the config block.
 		moveKeyLast(node, "config")
 
 		newSeq.Content = append(newSeq.Content, node)
 	}
 
-	// Anything the resolver neither kept nor explicitly dropped stays put, so
-	// disabling remove_stale really does leave columns alone.
+	// Anything the resolver neither kept nor dropped stays put, so disabling
+	// remove_stale really does leave columns alone.
 	for _, c := range existingOrder {
 		key := fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")), opts.cfg)
 		if kept[key] {
@@ -211,12 +203,10 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 	return changes
 }
 
-// dropItemComments reproduces dbt-osmosis' handling of comments inside a column
-// list. dbt-osmosis rebuilds the list as a fresh Python list, so ruamel loses
-// every comment attached to an item; the only survivor is the comment above the
-// first entry, which ruamel files against the `columns:` key rather than the
-// item. Reproducing that loss is opt-in (output.comments: osmosis) and exists so
-// the two tools can be compared byte for byte.
+// dropItemComments reproduces dbt-osmosis' comment loss inside a column list:
+// it rebuilds the list as a fresh Python list, so ruamel loses every comment
+// attached to an item except the one above the first entry, which it files
+// against the `columns:` key. Opt-in, so the two tools compare byte for byte.
 func dropItemComments(old, updated []*yaml.Node) {
 	var lead string
 	if len(old) > 0 {
@@ -230,9 +220,8 @@ func dropItemComments(old, updated []*yaml.Node) {
 	}
 }
 
-// setMeta writes the complete meta mapping, at the top level or inside a
-// `config:` block, and removes whichever of the two is not in use so a column
-// never ends up carrying both.
+// setMeta writes the complete meta mapping, top level or inside `config:`, and
+// removes the other so a column never carries both.
 func setMeta(entry *yaml.Node, meta []inherit.MetaEntry, configBlock bool) {
 	if len(meta) == 0 {
 		yamlfile.MapDelete(entry, "meta")
@@ -253,8 +242,8 @@ func setMeta(entry *yaml.Node, meta []inherit.MetaEntry, configBlock bool) {
 		m = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		yamlfile.MapSet(holder, "meta", m)
 	}
-	// Rebuild in the resolved order, reusing existing value nodes so any
-	// comments and quoting style on them survive.
+	// Rebuild in the resolved order, reusing existing value nodes so comments and
+	// quoting style survive.
 	rebuilt := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	for _, e := range meta {
 		v, err := yamlfile.Encode(e.Value)
@@ -294,7 +283,6 @@ func setTags(entry *yaml.Node, tags []string, configBlock bool) {
 }
 
 // moveKeyLast shifts a key, and its value, to the end of a mapping, leaving the
-// order of everything else alone.
 func moveKeyLast(m *yaml.Node, key string) {
 	if m == nil || m.Kind != yaml.MappingNode {
 		return
@@ -323,7 +311,6 @@ func ensureConfig(entry *yaml.Node) *yaml.Node {
 }
 
 // deleteFromConfig removes a key from the `config:` block, dropping the block
-// itself once it is empty.
 func deleteFromConfig(entry *yaml.Node, key string) {
 	cfg := yamlfile.MapGet(entry, "config")
 	if cfg == nil || cfg.Kind != yaml.MappingNode {

@@ -1,8 +1,8 @@
 # Using dbt-ditto
 
-Install, configure and run. For the repository's own build, tests and release
-machinery see [development.md](development.md); for architecture and
-conventions see [AGENTS.md](../AGENTS.md).
+Install, configure and run. Build, test and release machinery is in
+[development.md](development.md); architecture and conventions in
+[AGENTS.md](../AGENTS.md).
 
 ## Install
 
@@ -15,8 +15,8 @@ pip install dbt-ditto
 go install github.com/rognerud/dbt-ditto/cmd/dbt-ditto@latest
 ```
 
-The Python package contains the binary itself, not a wrapper, and pulls in
-nothing else — no dbt, no Python dependencies.
+The Python package carries the binary itself, not a wrapper, and pulls in
+nothing else.
 
 ## Quick start
 
@@ -34,18 +34,15 @@ dbt-ditto inherit --check
 
 Configuration is searched for upwards from the working directory:
 `dbt_ditto.yml`, `dbt_ditto.yaml`, `.dbt_ditto.yml`, then `pyproject.toml` if it
-carries a `[tool.dbt-ditto]` table. A `pyproject.toml` without that table, or one
-that will not parse, is skipped and the search continues upwards, so an unrelated
-packaging file never shadows a real config. `-c PATH` names a file directly, in
-either format; a `pyproject.toml` named that way but missing the table is an
-error rather than a silent empty config.
-
-`dbt_ditto.yml`:
+carries a `[tool.dbt-ditto]` table. One without that table, or one that will not
+parse, is skipped and the search continues, so an unrelated packaging file never
+shadows a real config. `-c PATH` names a file directly, in either format; a
+`pyproject.toml` named that way but missing the table is an error.
 
 ```yaml
+# dbt_ditto.yml
 projects:
   - path: projects/platform
-  - path: projects/analytics
   # A project you inherit from but must not write to.
   - path: ../vendor-dbt
     upstream: true
@@ -53,12 +50,12 @@ projects:
   - manifest: ../artifacts/finance/manifest.json
 ```
 
-A project is not named here. Its name is whatever `dbt_project.yml`, or the
-manifest, says it is, and that name is what decides which nodes belong to it —
-naming it again could only agree, or disagree and silently select nothing.
+A project is not named here: its name is whatever `dbt_project.yml` or the
+manifest says, and that is what decides which nodes belong to it.
 
 The same list in `pyproject.toml`, where a list of tables is how TOML spells a
-list of projects:
+list of projects. It is decoded and handed to the same reader the YAML goes
+through, so the two formats cannot drift; `[tool.dbt_ditto]` is accepted too.
 
 ```toml
 [tool.dbt-ditto]
@@ -73,51 +70,11 @@ upstream = true
 
 [tool.dbt-ditto.inheritance]
 progenitor = true
-
-[tool.dbt-ditto.inheritance.derived]
-enabled = true
 ```
 
-The table is decoded and then handed to the same reader the YAML goes through,
-so the two formats cannot drift: every key, default and nested section has one
-definition. `[tool.dbt_ditto]` is accepted as well, since the underscore and the
-hyphen are the same name to anyone writing it.
-
-Every other key is optional and defaults to dbt-osmosis' behaviour.
-[Settings](#settings) below tables every key with its default and what changing
-it does; [`internal/config/config.go`](../internal/config/config.go) is the
-source of truth. The ones people actually reach for:
-
-```yaml
-inheritance:
-  force: false            # overwrite descriptions a column already has
-  progenitor: true        # record where a description came from, in meta
-  directives: true        # honour `description: "Inherited: model.column"`
-  warn_ambiguous: true    # report columns the parents document differently
-  ambiguity_meta: false   # and record that in the column's meta (see below)
-  skip_meta_keys: [owner] # meta keys that must never be inherited
-  placeholders: ["", "TODO", "Not documented"]
-  derived:
-    enabled: false        # follow a column through a rename (see below)
-  backfill:
-    enabled: false        # document sources from downstream (see below)
-
-columns:
-  data_types: true        # write data_type from the catalog
-  case: preserve          # preserve | lower | upper
-  order: catalog          # catalog | yaml | alphabetical
-  remove_stale: true      # drop columns the warehouse no longer has
-  expand_structs: true    # document struct fields as `profile.first_name`
-  comments: new           # use warehouse COMMENTs: new | always | never
-
-organize:
-  enabled: true           # move models into the file their path rule names
-
-output:
-  comments: follow        # follow | osmosis
-
-loom: true                # read dbt_loom.config.yml for upstream manifests
-```
+Every other key is optional and defaults to dbt-osmosis' behaviour;
+[`internal/config/config.go`](../internal/config/config.go) is the source of
+truth.
 
 ## Settings
 
@@ -184,58 +141,48 @@ and checks the described difference actually appears
 | `organize.delete_empty` | `true` | set `false` to leave behind a schema file whose last model moved out |
 | `output.comments` | `follow` | `osmosis` to reproduce dbt-osmosis' loss of every YAML comment inside a column list except the first |
 
-Whether meta and tags are nested under `config:` is **not** a setting: dbt ≥ 1.9.6
-reads them there and older dbt does not read them there at all, so the manifest's
-own dbt version decides it. Nor is a project's name, which is whatever
-`dbt_project.yml` says and is what decides which nodes belong to it.
+Source-provider settings (`sources.*`) are tabled in
+[source-providers.md](source-providers.md).
 
+Whether meta and tags nest under `config:` is **not** a setting: dbt >= 1.9.6
+reads them there and older dbt does not, so the manifest's dbt version decides.
 Command-line flags — `--check`, `--dry-run`, `--select`, `-c`, `--verbose`,
 `--no-organize` — are listed by `dbt-ditto --help`.
 
 ## Cross-project inheritance
 
 **dbt-ditto is not a replacement for dbt-loom.** Loom's job at dbt runtime —
-injecting upstream nodes into the manifest dbt is parsing, so a cross-project
-`ref()` compiles — is untouched, and dbt-ditto has no dbt plugin, writes no
-manifest, and fetches nothing over the network. It runs *after* dbt, over
-artifacts already on disk, and the only files it writes are schema YAML.
+injecting upstream nodes into the manifest dbt is parsing — is untouched.
+dbt-ditto has no dbt plugin and fetches nothing: it runs *after* dbt, over
+artifacts on disk, and writes only schema YAML. Three ways an upstream reaches
+the graph:
 
-What it takes over is the documentation half. Three ways an upstream reaches the
-graph, in the order you are likely to hit them:
-
-1. **Loom already injected it.** A project parsed with dbt-loom active has the
-   upstream nodes, and their documentation, inside its own `manifest.json`.
-   Nothing extra is needed: point dbt-ditto at the project and inheritance
-   crosses the boundary because the manifest already does.
+1. **Loom already injected it**, so the upstream nodes and their documentation
+   are inside the project's own `manifest.json`.
 2. **`dbt_loom.config.yml` is read.** Every `type: file` manifest in it is loaded
-   as an upstream project, honouring `DBT_LOOM_CONFIG`. This covers a manifest
-   parsed without the plugin, and keeps the upstream list in one place instead of
-   copied into `dbt_ditto.yml`. The remote loom backends (`dbt_cloud`, `s3`,
-   `gcs`, `azure`) are *not* fetched; each one is reported on stderr, and the fix
-   is to download the artifact and name it under `manifest:`. Set `loom: false`
-   to switch the discovery off.
-3. **You list it yourself**, as `path:` (a checkout) or `manifest:` (a bare
-   artifact, gzipped or not). An explicit entry always wins over what loom says.
+   as an upstream, honouring `DBT_LOOM_CONFIG`. The remote backends (`dbt_cloud`,
+   `s3`, `gcs`, `azure`) are *not* fetched; each is reported on stderr, and the
+   fix is to download the artifact and name it under `manifest:`. `loom: false`
+   switches the discovery off.
+3. **You list it yourself**, as `path:` or `manifest:`. An explicit entry always
+   wins over what loom says.
 
-Once loaded, the manifests become one graph: `depends_on` edges that name a
+Once loaded, the manifests become one graph: `depends_on` edges naming a
 `unique_id` no manifest contains are repaired by resource name, and only models
 marked `access: public` are eligible, matching dbt's own cross-project rules.
 Upstream projects donate metadata and are never written to.
 
 ## Documenting source tables
 
-Inheritance runs downhill, which leaves raw sources out entirely. A source is a
-root of the DAG, so nothing upstream can ever document it, and it is usually the
-least documented thing in the project. Two routes reach it, and they compose.
+Inheritance runs downhill, so a source — a root of the DAG — can never inherit.
+Two routes reach it, and they compose.
 
-**The warehouse's own comments.** A `COMMENT ON COLUMN` in Snowflake, BigQuery,
-Databricks or DuckDB arrives in `catalog.json`, and dbt-ditto uses it as the
-column's description. This is on by default for columns being added, which is
-what dbt-osmosis does. `columns.comments: always` also fills a column that is
-already listed but undocumented; `never` turns it off.
+**The warehouse's own comments.** A `COMMENT ON COLUMN` arrives in
+`catalog.json` and is used as the description. On by default for columns being
+added, as dbt-osmosis does; `columns.comments: always` also fills a column that
+is already listed but undocumented, `never` turns it off.
 
-**Backfill from downstream.** The description you want usually does exist, one
-step below, in the staging model that reads the source:
+**Backfill from downstream**, from the staging model that reads the source:
 
 ```yaml
 inheritance:
@@ -244,44 +191,26 @@ inheritance:
     sources_only: true   # the default; set false to backfill models too
 ```
 
-The search walks descendants nearest-first and does not stop at the first model
-that merely selects the column through — a staging model that passes a column
-along without describing it is not an answer, so it keeps going.
-
-Three rules keep it safe:
-
-- **It only ever fills a blank.** A column that already has a description keeps
-  it, so backfill cannot overwrite anything written by hand.
-- **The source's own documentation wins.** A warehouse comment beats anything
-  found downstream, because it belongs to the source rather than to a consumer
-  of it.
-- **Sources only, by default.** Otherwise a mart's wording starts flowing
-  backwards into every model that feeds it.
-
-In the fixture, the `billing` source documents none of its four columns. After a
-backfill run all four are documented: three carried up from `stg_invoices`, and
-`order_id` — which nothing in dbt mentions — from the DuckDB `COMMENT`.
+The search walks descendants nearest-first and does not stop at a model that
+merely selects the column through undocumented. Three rules keep it safe: it
+only ever fills a blank, the source's own warehouse comment beats anything found
+downstream, and by default only sources are backfilled — otherwise a mart's
+wording flows backwards into everything that feeds it.
 
 ## Asking the warehouse: source providers
 
-The two routes above need the documentation to exist somewhere dbt has already
-written down. Often it exists only in the warehouse: a description set on the
-table in BigQuery, a Snowflake `COMMENT`, labels, tags, a policy tag. A
-**provider** fetches it.
-
-A provider is a separate program. dbt-ditto writes it the list of external
+Often the documentation exists only in the warehouse: a BigQuery table
+description, a Snowflake `COMMENT`, labels, a policy tag. A **provider** is a
+separate program that fetches it; dbt-ditto writes it the list of external
 sources and reads documentation back, which is what keeps the binary a single
-static file with two pure-Go dependencies that connects to nothing. Reference
-providers for **BigQuery and Snowflake** ship in
-[`packaging/providers/`](../packaging/providers/README.md).
+static file that connects to nothing. Reference providers for BigQuery and
+Snowflake ship in [`packaging/providers/`](../packaging/providers/README.md).
 
 ```yaml
 sources:
   providers:
     - command: "uv run --with google-cloud-bigquery packaging/providers/bigquery.py"
       match: { database: "bq-*" }
-    - command: "uv run --with snowflake-connector-python packaging/providers/snowflake.py"
-      match: { database: "SNOWFLAKE_*" }
 ```
 
 ```sh
@@ -290,75 +219,21 @@ dbt-ditto inherit                     # reads the cache, connects to nothing
 dbt-ditto inherit --check             # likewise: CI needs no credentials
 ```
 
-**Credentials are dbt's own.** A provider is told each project's root, its
-`profile:` and the profiles directory, and resolves the connection from
-`profiles.yml` — the same entry, the same target, the same method `dbt run`
-uses. Nothing is configured twice. `--target` picks the target, falling back to
-`$DBT_TARGET`.
+**Credentials are dbt's own.** A provider is told each project's root,
+`profile:` and profiles directory, and resolves the connection from
+`profiles.yml` — the same entry, target and method `dbt run` uses. `--target`
+picks the target, falling back to `$DBT_TARGET`.
 
-**Only external sources are asked about**: the ones no loaded project builds.
-A dbt-loom upstream arrives as a model and is documented through the graph; a
-source backed by a seed is already known to dbt. Neither is ever sent to a
-provider, so a refresh asks about tens of tables rather than thousands and takes
-about a second — against minutes for `dbt docs generate`, which walks every
-relation in the project to reach the same handful.
-
-A source that points at a relation another loaded project *builds* is reported
-rather than fetched. That table can be documented properly through the normal
-chain, and a cross-project `ref()` is the fix.
+**Only external sources are asked about**: the ones no loaded project builds, so
+a refresh asks about tens of tables rather than thousands. A source pointing at
+a relation another loaded project *builds* is reported rather than fetched; a
+cross-project `ref()` is the fix.
 
 **Refreshing is explicit, and its answer is cached** in
-`target/ditto-sources.json`. Providers make network calls, and `--check` runs in
-CI where a flaky API must not fail a formatting check. A provider that fails is
-a warning, not a failed run, unless `sources.strict: true`.
-
-### Labels, tags and meta
-
-Key-value pairs attached to an object are the one piece of metadata every
-warehouse has — BigQuery labels, Snowflake and Unity Catalog tags, Glue table
-parameters — so providers report them raw and dbt-ditto routes them:
-
-```yaml
-sources:
-  labels:
-    mode: meta            # meta | tags | both | ignore
-    meta_key: labels      # nest under meta.labels; "" flattens into meta
-    tag_format: "{key}:{value}"
-    exclude: ["terraform_*"]
-```
-
-`meta` is the default because a dbt tag is a **selector**: turning every
-warehouse label into one would silently change what `--select tag:...` matches.
-A pair with an empty value renders as the bare key, since BigQuery permits
-valueless labels and `owner:` is not a useful tag.
-
-### What travels downstream
-
-A relation's own labels (owner, cost centre, Terraform stack) never travel: they
-describe the physical object, and node meta is not inherited at all. A column's
-labels and policy tags do travel, like a description, and what the match
-preserved decides how far:
-
-```yaml
-sources:
-  labels:
-    propagate:
-      column: true        # off stops labels at the source
-      structs: true       # a struct pack or unpack is the same data, reshaped
-      aggregates: warn    # inherit | warn | ignore
-      on_conflict: warn   # warn | first | none
-```
-
-An **aggregate** match is the interesting case: `avg_salary` still means salary,
-averaged, so the description carries, but the value the label classified no
-longer exists, so the label does not. A **conflict** — two ancestors in one
-generation labelling a column differently — writes nothing and says so. Both
-default to `warn` rather than to a silent guess; the reasoning is in
-[source-providers.md](source-providers.md#propagation).
-
-> dbt-ditto writing `policy_tag: pii/high` onto a downstream column does **not**
-> apply that policy tag in the warehouse. It records what upstream says, which
-> is worth knowing and is not enforcement.
+`target/ditto-sources.json`, because `--check` runs in CI where a flaky API must
+not fail a formatting check. A provider that fails is a warning unless
+`sources.strict: true`. Labels, tags, policy tags and how far they propagate are
+covered in [source-providers.md](source-providers.md).
 
 ### Carrying keys dbt-ditto does not model
 
@@ -368,14 +243,14 @@ inheritance:
 ```
 
 Named keys are carried down the DAG like meta — an ancestor's value wins — and
-written back beside `name`, where dbt reads them. The list is explicit rather
-than a catch-all because decoding every unknown key would allocate a map per
-column on a manifest that may hold millions.
+written back beside `name`. The list is explicit rather than a catch-all because
+decoding every unknown key would allocate a map per column on a manifest that
+may hold millions.
 
 ## Saying where the documentation lives
 
-Name matching cannot follow a column that was renamed, and no heuristic should
-be trusted to guess. Name the source instead:
+Name matching cannot follow a renamed column, and no heuristic should be trusted
+to guess. Name the source instead:
 
 ```yaml
 columns:
@@ -383,24 +258,21 @@ columns:
     description: "Inherited: stg_customers.customer_id"
 ```
 
-The directive outranks everything — ordinary name matching, `force`, a local
-description — because it is the analyst saying what the answer is. The node may
-be a bare name or a full `unique_id`
-(`model.platform.stg_customers.customer_id`), which is how to be unambiguous
-when two projects both have a model of that name.
-
-A directive that names a node nobody has, a column that does not exist, or a
-column nobody has documented is reported and **left in the file**:
+The directive outranks everything — name matching, `force`, a local description
+— because it is the analyst saying what the answer is. The node may be a bare
+name or a full `unique_id`, which is how to be unambiguous when two projects
+both have a model of that name. One naming a node nobody has, a column that does
+not exist, or a column nobody has documented is reported and **left in the
+file**, since deleting it would lose the instruction and writing it back
+silently would look like prose:
 
 ```
 warning: model.shop.dim_customers.cust_id "stg_customers.cust_id" has no column "cust_id"
 ```
 
-Deleting it would lose the instruction; writing it back silently would look like
-prose. The syntax is [dbt-doc-inherit's](https://github.com/tripleaceme/dbt-doc-inherit),
-so a project already using those directives keeps working. Change the marker
-with `inheritance.directive_prefix`, or turn the feature off with
-`inheritance.directives: false`.
+The syntax is [dbt-doc-inherit's](https://github.com/tripleaceme/dbt-doc-inherit).
+Change the marker with `inheritance.directive_prefix`, or turn the feature off
+with `inheritance.directives: false`.
 
 ## When parents disagree
 
@@ -413,22 +285,13 @@ warning: model.platform.stg_orders_enriched.order_id documented differently by
          source.platform.crm.raw_orders; took seed.platform.raw_orders
 ```
 
-Warnings go to stderr, never fail the run, and never change what is written.
-Settle one by documenting the column locally or with a directive. A nearer
-generation overriding a further one is not a disagreement — that is inheritance
-working — so it is not reported. Turn them off with
-`inheritance.warn_ambiguous: false`.
+Warnings go to stderr, never fail the run, and never change what is written. A
+nearer generation overriding a further one is inheritance working, and is not
+reported. Turn them off with `inheritance.warn_ambiguous: false`.
 
-A warning is gone the moment the terminal scrolls, and the person who later
-reads the schema file has no way to tell that the wording was picked
-arbitrarily. `inheritance.ambiguity_meta` records it where it stays, the way
-`progenitor` records where the description came from:
-
-```yaml
-inheritance:
-  ambiguity_meta: true
-  ambiguity_key: dbt_ditto_ambiguous   # the default
-```
+A warning is gone the moment the terminal scrolls. `inheritance.ambiguity_meta`
+records it where it stays, the way `progenitor` records where a description came
+from:
 
 ```yaml
 - name: order_id
@@ -439,25 +302,16 @@ inheritance:
       - source.platform.crm.raw_orders
 ```
 
-The value lists the ancestors that were overruled; the one that won is already
-in the progenitor key. The two switches are independent, so the annotation can
-be written with the stderr warnings turned off, and the other way round.
-
-Three rules keep the annotation honest:
-
-- **Only an inherited description is annotated.** Documenting the column
-  locally, or pointing at an answer with a directive, means nothing was chosen
-  arbitrarily — and removes the annotation on the next run rather than leaving a
-  stale claim behind.
-- **It is never inherited.** An ancestor's annotation is about that ancestor's
-  parents, so it is skipped like the progenitor key rather than copied down.
-- **Off by default**, because it writes meta dbt-osmosis would not, and parity
-  with an existing dbt-osmosis project is the promise.
+The value lists the ancestors that were overruled; the winner is already in the
+progenitor key. The two switches are independent. Three rules keep the
+annotation honest: only an inherited description is annotated (documenting the
+column locally removes it on the next run), it is never itself inherited, and it
+is off by default because it writes meta dbt-osmosis would not.
 
 ## Settling it: `dbt_ditto_definitive`
 
 A warning says the parents disagree. It cannot say who is right, because that is
-not a fact about the DAG — it is a decision. Write the decision down:
+a decision rather than a fact about the DAG. Write the decision down:
 
 ```yaml
 columns:
@@ -467,31 +321,27 @@ columns:
       dbt_ditto_definitive: true
 ```
 
-From then on, every column called `customer_id` in the run says that. Not just
-the models below: the seed above, the source it came from, and the same column
-in the other projects. A decision has no direction, so this one is applied in
-all of them.
+From then on every column called `customer_id` in the run says that — not just
+the models below, but the seed above, the source it came from, and the same
+column in the other projects. A decision has no direction. Precisely:
 
-What the marker does, precisely:
-
-- **It outranks everything else.** Name matching, a directive, `force`, a
-  description written by hand — the settled wording replaces all of them.
-- **The declaring column is locked.** It is the decision, so nothing is
-  inherited into it and nothing overwrites it.
-- **The wording is attributed.** A column that takes it records the declaring
-  node in `osmosis_progenitor`, exactly as an ordinarily inherited description
-  does, so the file still says where its documentation came from.
+- **It outranks everything else**: name matching, a directive, `force`, a
+  description written by hand.
+- **The declaring column is locked**: nothing is inherited into it and nothing
+  overwrites it.
+- **The wording is attributed**: a column that takes it records the declaring
+  node in `osmosis_progenitor`.
 - **The ambiguity warning stops** for that column, and so does the
-  `ambiguity_meta` annotation: nothing arbitrary is happening any more.
-- **The marker itself is never inherited.** Only the column that declares the
-  decision carries it; the columns that take the wording do not, or every column
-  downstream would claim to be the decision too.
-- **A manifest-only upstream's declarations are ignored.** A dbt-loom manifest
-  cannot be read, reviewed or edited from this repository, so it does not get to
-  rewrite documentation here. Declarations in a project you have checked out —
-  including one marked `upstream: true` — do count.
+  `ambiguity_meta` annotation.
+- **The marker itself is never inherited**, or every column downstream would
+  claim to be the decision too.
+- **A manifest-only upstream's declarations are ignored**, since a dbt-loom
+  manifest cannot be reviewed or edited from this repository. Declarations in a
+  checked-out project — including one marked `upstream: true` — do count.
 
-Two declarations that disagree **stop the run**:
+Two declarations that disagree **stop the run**, because choosing between them
+by rule is the exact thing the marker exists to avoid. The same wording declared
+in several places is one decision, not a conflict.
 
 ```
 conflicting dbt_ditto_definitive declarations for column "customer_id":
@@ -501,18 +351,14 @@ conflicting dbt_ditto_definitive declarations for column "customer_id":
   resolve it by leaving one declaration, or by making them agree word for word
 ```
 
-Choosing between them by rule is the exact thing the marker exists to avoid, so
-nothing is written until a person settles it. The same wording declared in
-several places is one decision, not a conflict.
-
-The key name is not configurable, unlike `progenitor_key` and `ambiguity_key`.
-Those name something this tool writes; this one is a contract between projects
-that may live in different repositories, and a contract each side spells
-differently is not one.
+The key name is not configurable, unlike `progenitor_key` and `ambiguity_key`:
+those name something this tool writes, while this one is a contract between
+projects that may live in different repositories.
 
 ## Where a description came from
 
-Every inherited description records its origin:
+Every inherited description records its origin, because it is the one line in a
+schema file nobody wrote:
 
 ```yaml
 - name: customer_id
@@ -521,63 +367,40 @@ Every inherited description records its origin:
     osmosis_progenitor: seed.platform.raw_customers
 ```
 
-An inherited description is the one line in a schema file nobody wrote, so
-leaving its origin out makes copied documentation indistinguishable from reviewed
-documentation, and it is the only way to see in the file that a description
-crossed a project boundary. dbt-osmosis leaves this off, so a project compared
-against it byte for byte sets `inheritance.progenitor: false` — which is what
-`scripts/parity.sh` does. Rename the key with `inheritance.progenitor_key`.
-
-Only genuinely inherited descriptions get one: a column documented locally has
-no progenitor.
+dbt-osmosis leaves this off, so a project compared against it byte for byte sets
+`inheritance.progenitor: false` — which is what `scripts/parity.sh` does. Only
+genuinely inherited descriptions get one.
 
 ## Following a column through a rename
 
 dbt-osmosis matches columns by name, so documentation stops the moment a column
-is aggregated or packed into a struct. `sum(amount_cents) as total_amount_cents`
-is the same quantity as `amount_cents`, but it arrives undocumented.
-
-Turning on `inheritance.derived` matches across the rename, in both directions:
-
-```yaml
-inheritance:
-  derived:
-    enabled: true
-```
+is aggregated or packed into a struct. Turning on `inheritance.derived` matches
+across the rename, in both directions:
 
 | Downstream column | Inherits from | Why |
 | --- | --- | --- |
 | `total_amount_cents` | `amount_cents` | a leading or trailing aggregate word is stripped |
-| `max_order_date` | `order_date` | same |
 | `profile.first_name` | `first_name` | the column was packed into a struct |
 | `first_name` | `profile.first_name` | and the reverse, when a struct is unpacked |
 | `totals.total_amount_cents` | `amount_cents` | both at once |
 
 This works from any ancestor, sources included, and across project boundaries.
+Two rules keep it from doing damage: an exact name match always wins, so a
+derived match is only consulted when nothing upstream shares the name; and only
+whole underscore-separated words are stripped, one at each end, so
+`counterparty_id` is not read as an aggregate of `erparty_id`.
 
-Two rules keep it from doing damage:
-
-- **An exact name match always wins.** A derived match is only ever consulted
-  when nothing upstream shares the column's name, so a real match is never
-  replaced by a guess.
-- **Only whole underscore-separated words are stripped**, and only one at each
-  end. `counterparty_id` is not read as an aggregate of `erparty_id`, and
-  `max_order_count` does not reduce all the way to `order`.
-
-It is off by default, because it is a lexical heuristic and it changes output
-dbt-osmosis would leave alone. Know what the heuristic buys: in the fixture,
-`count(order_id) as order_id_count` inherits *"Surrogate key for an order."*,
-which describes the thing being counted rather than the count. Drop `count` from
-`inheritance.derived.suffixes` if that trade is not worth it. Nothing here parses
-SQL, so a column renamed for semantic rather than lexical reasons —
-`lifetime_value_cents` from `amount_cents` — is still not matched.
+It is off by default, being a lexical heuristic that changes output dbt-osmosis
+would leave alone. In the fixture, `count(order_id) as order_id_count` inherits
+*"Surrogate key for an order."*, which describes the thing being counted rather
+than the count; drop `count` from `inheritance.derived.suffixes` if that trade
+is not worth it. Nothing here parses SQL.
 
 Struct *expansion* is separate and on by default: adapters that understand
 nested data report `profile.first_name` as a column in its own right, so
 dbt-osmosis documents it and dbt-ditto has to as well. It reads the composite
-type out of `catalog.json` to get there, and understands DuckDB's
-`STRUCT(...)`, BigQuery's `STRUCT<...>` and `ARRAY<STRUCT<...>>`, nested
-structs, and quoted field names.
+type out of `catalog.json`, and understands DuckDB's `STRUCT(...)`, BigQuery's
+`STRUCT<...>` and `ARRAY<STRUCT<...>>`, nested structs, and quoted field names.
 
 ## How inheritance resolves
 
@@ -597,35 +420,27 @@ For each column, in the order dbt-osmosis does it:
 
 Generations come from a depth-first walk with one shared visited set, so a node
 reachable by several routes is filed under the depth the walk first reached it
-at. That is dbt-osmosis' behaviour and it decides who wins a conflict, so it is
-reproduced exactly rather than "improved".
+at. That decides who wins a conflict, so it is reproduced exactly.
 
 ## Deliberate differences from dbt-osmosis
 
 All documented, all switchable:
 
-1. **Provenance is recorded.** `inheritance.progenitor` is on, so an inherited
-   description carries the node it came from in `meta`. This is the only default
-   that changes what an existing dbt-osmosis project's YAML looks like; set it
-   to `false` for byte parity.
+1. **Provenance is recorded.** `inheritance.progenitor` is on. This is the only
+   default that changes what an existing dbt-osmosis project's YAML looks like;
+   set it to `false` for byte parity.
 2. **Comments inside a column list.** dbt-osmosis rebuilds the list from
-   scratch, so ruamel drops every comment except the one above the first entry.
+   scratch, so ruamel drops every comment except the one above the first entry;
    dbt-ditto keeps each comment with the column it annotates. Set
-   `output.comments: osmosis` for the lossy behaviour — which is what the parity
-   run uses, so the comparison is like for like.
-3. **Snapshots as inheritance sources.** dbt-osmosis' ancestor walk only follows
-   `model.`, `seed.` and `source.` dependencies. dbt-ditto also follows
-   `snapshot.`.
-4. **Where warehouse comments come from.** Both tools use them; dbt-osmosis asks
-   the adapter, dbt-ditto reads `catalog.json`. On an adapter that reports
-   comments, such as Snowflake, they agree. On DuckDB the adapter reports none
-   while the catalog has them, so dbt-ditto finds documentation dbt-osmosis
-   cannot see. The parity run sets `columns.comments: never` to compare like
-   for like.
+   `output.comments: osmosis` for the lossy behaviour, which is what the parity
+   run uses.
+3. **Snapshots as inheritance sources.** dbt-osmosis' ancestor walk follows only
+   `model.`, `seed.` and `source.`; dbt-ditto also follows `snapshot.`.
+4. **Where warehouse comments come from.** dbt-osmosis asks the adapter,
+   dbt-ditto reads `catalog.json`. On DuckDB the adapter reports none while the
+   catalog has them, so dbt-ditto finds documentation dbt-osmosis cannot see. The
+   parity run sets `columns.comments: never` to compare like for like.
 
 `inheritance.backfill`, `inheritance.derived` and `inheritance.ambiguity_meta`
-are also divergences, but all three are off by default, so an existing
-dbt-osmosis project is unaffected until you ask for them. Directives and
-ambiguity warnings are on, and neither changes output: a directive only fires on
-a description written to be one, and a warning is printed rather than written.
-
+are also divergences, but all three are off by default. Directives and ambiguity
+warnings are on, and neither changes output.

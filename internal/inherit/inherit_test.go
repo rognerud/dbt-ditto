@@ -11,9 +11,7 @@ import (
 
 // --- fixture helpers -------------------------------------------------------
 
-// col builds a manifest column. A description of "" means the column exists but
-// is undocumented, which is the state dbt-osmosis' column injection leaves an
-// unwritten-about column in, and which still lets it claim a generation.
+// col builds a manifest column.
 func col(name, desc string, opts ...func(*dbt.Column)) *dbt.Column {
 	c := &dbt.Column{Name: name, Description: desc}
 	for _, o := range opts {
@@ -51,8 +49,7 @@ func withTags(tags ...string) func(*dbt.Column) {
 	return func(c *dbt.Column) { c.Tags = tags }
 }
 
-// node builds a model node. Dependencies are given as bare names and expanded
-// to `model.<pkg>.<name>` unless they already look like a unique_id.
+// node builds a model node.
 func node(pkg, name string, deps []string, cols ...*dbt.Column) *dbt.Node {
 	n := &dbt.Node{
 		UniqueID:     "model." + pkg + "." + name,
@@ -98,9 +95,8 @@ func project(name string, nodes ...*dbt.Node) *dbt.Project {
 	return p
 }
 
-// catalogFor gives a project a catalog saying the node has exactly these
-// columns, in this order. That is what makes the column list warehouse truth
-// and so licenses removing anything else.
+// catalogFor gives a project a catalog saying the node has exactly these columns, in
+// this order.
 func catalogFor(p *dbt.Project, n *dbt.Node, columns ...string) {
 	if p.Catalog == nil {
 		p.Catalog = &dbt.Catalog{
@@ -241,9 +237,7 @@ func TestForceOverwritesLocalDescription(t *testing.T) {
 
 // --- conflicting upstreams -------------------------------------------------
 
-// Two parents in the same generation both document the column. The first by
-// unique_id claims it and the other is skipped entirely, so the loser's tags do
-// not leak in either.
+// Two parents in the same generation both document the column.
 func TestConflictWithinAGenerationIsSettledByUniqueID(t *testing.T) {
 	a := node("p", "alpha", nil, col("id", "From alpha.", withTags("alpha")))
 	b := node("p", "beta", nil, col("id", "From beta.", withTags("beta")))
@@ -286,9 +280,8 @@ func TestNearerGenerationWins(t *testing.T) {
 	}
 }
 
-// An undocumented model still shadows its own ancestors for the columns it
-// carries: it claims the column for its generation and contributes nothing.
-// This is what stops a distant root from reaching past a rewritten middle.
+// An undocumented model still shadows its own ancestors for the columns it carries: it
+// claims the column for its generation and contributes nothing.
 func TestUndocumentedAncestorStillClaimsItsGeneration(t *testing.T) {
 	root := seed("p", "raw", col("id", "From the root.", withTags("pk")))
 	// model.p.blank sorts before seed.p.raw and has the column but no docs.
@@ -567,9 +560,7 @@ func TestAlphabeticalColumnOrder(t *testing.T) {
 
 // --- graph shape -----------------------------------------------------------
 
-// A diamond reaches the shared root by two routes. The generation it is filed
-// under is the depth the depth-first walk first reached it at, which is what
-// dbt-osmosis does, and it is visited only once.
+// A diamond reaches the shared root by two routes.
 func TestDiamondVisitsTheSharedRootOnce(t *testing.T) {
 	root := seed("p", "raw", col("id", "Root."))
 	left := node("p", "left", []string{"seed.p.raw"}, col("id", ""))

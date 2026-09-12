@@ -8,28 +8,15 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// DefinitiveKey marks a column's description as the settled wording for that
-// column name, everywhere.
-//
-//	columns:
-//	  - name: customer_id
-//	    description: Surrogate key of the customer.
-//	    meta:
-//	      dbt_ditto_definitive: true
-//
-// A definitive column is a decision written down, for when several ancestors
-// disagree: its description is copied to every column of that name in the
-// graph — up the DAG as well as down it, and across project boundaries — and it
-// outranks name matching, directives and `force`.
-//
-// The key is not configurable: it is a contract between repositories, and a
-// contract each side spells differently is not one.
+// DefinitiveKey (`meta: {dbt_ditto_definitive: true}`) marks a column's description as
+// the settled wording for that column name everywhere: it is copied to every column of
+// that name in the graph, up the DAG as well as down and across project boundaries,
+// outranking name matching, directives and `force`.
 const DefinitiveKey = "dbt_ditto_definitive"
 
 // Definitive is one column that has been declared settled.
 type Definitive struct {
 	// Node is the unique_id of the node holding the declaration, and is what an
-	// inheriting column records as its progenitor.
 	Node string
 	// Column is the column name as the declaration spells it.
 	Column string
@@ -37,9 +24,8 @@ type Definitive struct {
 	Description string
 }
 
-// ConflictError is two or more definitive declarations for the same column that
-// do not agree. There is no sensible way to pick between them — that is the
-// whole point of the marker — so the run stops and names them all.
+// ConflictError is two or more definitive declarations for one column that do not
+// agree.
 type ConflictError struct {
 	Column   string
 	Claims   []Definitive
@@ -68,12 +54,8 @@ func sameSpelling(claims []Definitive) bool {
 	return true
 }
 
-// BuildDefinitives collects every definitive declaration in the graph, keyed by
-// the folded column name, and fails on a disagreement.
-//
-// Declarations in a manifest-only project (a dbt-loom upstream) are ignored: a
-// definitive is a decision this repository makes about its own documentation,
-// and an injected manifest cannot be reviewed or edited here.
+// BuildDefinitives collects every definitive declaration in the graph, keyed by folded
+// column name, and fails on a disagreement.
 func BuildDefinitives(g *Graph, fold func(string) string) (map[string]Definitive, error) {
 	claims := map[string][]Definitive{}
 	for _, n := range g.Nodes {
@@ -114,9 +96,7 @@ func BuildDefinitives(g *Graph, fold func(string) string) (map[string]Definitive
 	return out, nil
 }
 
-// disagreement reports a conflict when the claims for one column do not all say
-// the same thing. Identical wording declared in several places is not a
-// conflict: it is the same decision, written down more than once.
+// disagreement reports a conflict when the claims for one column differ.
 func disagreement(key string, list []Definitive, fold func(string) string) error {
 	for _, c := range list[1:] {
 		if c.Description != list[0].Description {
@@ -130,8 +110,7 @@ func disagreement(key string, list []Definitive, fold func(string) string) error
 	return nil
 }
 
-// isDefinitive reports whether a column carries the marker. Only a true boolean
-// counts: `dbt_ditto_definitive: false` is somebody explicitly saying no.
+// isDefinitive reports whether a column carries the marker.
 func isDefinitive(c *dbt.Column) bool {
 	m := c.EffectiveMeta()
 	if m == nil {

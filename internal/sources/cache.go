@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// cacheFile is the on-disk form. It is the provider response shape plus a
-// header, so a person can read it, and so a provider that writes one directly
-// is a legitimate way to use this without configuring a provider at all.
+// cacheFile is the on-disk form: the provider response shape plus a header, so
+// a person can read it and writing one by hand is a legitimate way to use this.
 type cacheFile struct {
 	Version     int       `json:"version"`
 	GeneratedAt time.Time `json:"generated_at"`
@@ -25,8 +24,8 @@ func Save(path string, set *Set) error {
 	for _, d := range set.Docs {
 		docs = append(docs, *d)
 	}
-	// Sorted so a refresh that learned nothing new produces an identical file,
-	// which is what makes the cache reviewable in a diff.
+	// Sorted so a refresh that learned nothing produces an identical file, which is
+	// what makes the cache reviewable in a diff.
 	sort.Slice(docs, func(i, j int) bool { return docs[i].UniqueID < docs[j].UniqueID })
 
 	body, err := json.MarshalIndent(cacheFile{
@@ -46,10 +45,7 @@ func Save(path string, set *Set) error {
 	return os.WriteFile(path, body, 0o644)
 }
 
-// Load reads a cache written by Save. A missing file is not an error: it means
-// no source enrichment, exactly as a missing catalog.json means no column
-// reconciliation. That is what lets `--check` run on a machine with no
-// warehouse credentials and no provider installed.
+// Load reads a cache written by Save.
 func Load(path string) (*Set, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

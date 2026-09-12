@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""dbt-ditto source provider for Snowflake.
-
-Documents external sources from Snowflake's own metadata, using the credentials
-dbt already has in profiles.yml.
-
-    sources:
-      providers:
-        - command: "uv run --with snowflake-connector-python packaging/providers/snowflake.py"
-
-One query per schema, not per table: INFORMATION_SCHEMA lives in the database
-being described, so every source in one database and schema is answered
-together. Tags are fetched separately and are allowed to fail — reading them
-needs privileges a documentation job is often not granted, and losing the tags
-is not a reason to lose the comments.
-"""
+"""dbt-ditto source provider for Snowflake."""
 
 from __future__ import annotations
 
@@ -26,21 +12,15 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from dbt_ditto_provider import (  # noqa: E402
     Column,
     Doc,
-    Project,
     Source,
-    load_profile,
+    each_project,
     read_request,
     write_response,
 )
 
 
 def connect(profile: dict[str, Any]):
-    """Open a connection from a dbt profile block.
-
-    dbt-snowflake talks to Snowflake through `snowflake.connector`, and so does
-    this, with the same keys out of the same profile. Password, key pair and
-    every `authenticator` value therefore work without being configured twice.
-    """
+    """Open a connection from a dbt profile block."""
     import snowflake.connector
 
     kwargs: dict[str, Any] = {
@@ -240,22 +220,7 @@ def main() -> None:
     docs: list[Doc] = []
     warnings: list[str] = []
 
-    for project_name, sources in request.by_project().items():
-        project = request.projects.get(project_name) or Project(
-            name=project_name, root="", profile="", target="", profiles_dir=""
-        )
-        try:
-            profile = load_profile(project)
-        except SystemExit as err:
-            warnings.append(f"{project_name}: {err}")
-            continue
-
-        if (profile.get("type") or "").lower() != "snowflake":
-            warnings.append(
-                f"{project_name}: profile target is {profile.get('type')!r}, not snowflake; skipped"
-            )
-            continue
-
+    for profile, sources in each_project(request, "snowflake", warnings):
         # Grouped because INFORMATION_SCHEMA lives in the database being
         # described: one query answers for every source that shares a schema.
         grouped: dict[tuple[str, str], list[Source]] = defaultdict(list)

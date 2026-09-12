@@ -7,8 +7,8 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// source builds a source node, the one kind of node that can never inherit
-// anything the ordinary way: it is a root of the DAG.
+// source builds a source node: the one kind that can never inherit, being a
+// root of the DAG.
 func source(pkg, sourceName, table string, cols ...*dbt.Column) *dbt.Node {
 	n := &dbt.Node{
 		UniqueID:     "source." + pkg + "." + sourceName + "." + table,
@@ -38,8 +38,7 @@ func attach(p *dbt.Project, nodes ...*dbt.Node) {
 	}
 }
 
-// catalogWithComments gives a node a catalog entry whose columns carry
-// warehouse comments, as Snowflake or BigQuery would report them.
+// catalogWithComments gives a node catalog columns carrying warehouse comments.
 func catalogWithComments(p *dbt.Project, n *dbt.Node, comments map[string]string, order ...string) {
 	if p.Catalog == nil {
 		p.Catalog = &dbt.Catalog{
@@ -67,8 +66,8 @@ func backfillOn(c *config.Config) {
 
 // --- warehouse comments ----------------------------------------------------
 
-// A source has nothing above it, so the warehouse's own comment is often the
-// only documentation that exists.
+// A source has nothing above it, so the warehouse comment is often the only
+// documentation that exists.
 func TestWarehouseCommentDocumentsANewColumn(t *testing.T) {
 	src := source("p", "billing", "raw_invoices")
 	p := project("p")
@@ -88,8 +87,7 @@ func TestWarehouseCommentDocumentsANewColumn(t *testing.T) {
 	}
 }
 
-// By default a column already written about is left alone, which is what
-// dbt-osmosis does: it only reads the comment for a column it is adding.
+// By default a column already written about is left alone, as dbt-osmosis does.
 func TestWarehouseCommentDoesNotFillAnExistingColumnByDefault(t *testing.T) {
 	src := source("p", "billing", "raw_invoices", col("invoice_id", ""))
 	p := project("p")
@@ -106,7 +104,7 @@ func TestWarehouseCommentDoesNotFillAnExistingColumnByDefault(t *testing.T) {
 }
 
 // `comments: always` is for a project that documents its sources in the
-// warehouse and wants that to reach the YAML even for columns already listed.
+// warehouse and wants that to reach columns already listed.
 func TestWarehouseCommentFillsExistingColumnWhenAsked(t *testing.T) {
 	src := source("p", "billing", "raw_invoices", col("invoice_id", ""))
 	p := project("p")
@@ -156,8 +154,7 @@ func TestWarehouseCommentsCanBeTurnedOff(t *testing.T) {
 
 // --- backfill from downstream ----------------------------------------------
 
-// The documentation for a raw source usually exists exactly one step
-// downstream, in the staging model that reads it.
+// A raw source's documentation usually exists one step downstream.
 func TestSourceIsBackfilledFromItsStagingModel(t *testing.T) {
 	src := source("p", "billing", "raw_invoices")
 	stg := node("p", "stg_invoices", []string{"source.p.billing.raw_invoices"},
@@ -176,8 +173,8 @@ func TestSourceIsBackfilledFromItsStagingModel(t *testing.T) {
 	}
 }
 
-// A staging model often selects a column straight through without documenting
-// it. The search has to keep going rather than stop at the first descendant.
+// A staging model often selects a column straight through undocumented, so the
+// search has to keep going rather than stop at the first descendant.
 func TestBackfillLooksPastAnUndocumentedDescendant(t *testing.T) {
 	src := source("p", "billing", "raw_invoices")
 	stg := node("p", "stg_invoices", []string{"source.p.billing.raw_invoices"},
@@ -212,8 +209,7 @@ func TestBackfillNeverOverwrites(t *testing.T) {
 	}
 }
 
-// A warehouse comment is the source's own documentation, so it wins over
-// anything found downstream.
+// A warehouse comment is the source's own documentation, so it wins.
 func TestWarehouseCommentBeatsBackfill(t *testing.T) {
 	src := source("p", "billing", "raw_invoices")
 	stg := node("p", "stg_invoices", []string{"source.p.billing.raw_invoices"},
@@ -230,7 +226,7 @@ func TestWarehouseCommentBeatsBackfill(t *testing.T) {
 }
 
 // Backfill is limited to sources by default: a mart's descriptions should not
-// start flowing backwards into the models that feed it.
+// flow backwards into the models that feed it.
 func TestBackfillIsLimitedToSourcesByDefault(t *testing.T) {
 	stg := node("p", "stg_invoices", nil, col("invoice_id", ""))
 	mart := node("p", "dim_invoices", []string{"stg_invoices"},
@@ -289,8 +285,8 @@ func TestDescendantsAreGroupedByDistance(t *testing.T) {
 	}
 }
 
-// Backfill and derived matching compose: a source column that only exists
-// downstream under an aggregated name is still found.
+// Backfill and derived matching compose: a source column that exists downstream
+// only under an aggregated name is still found.
 func TestBackfillUsesDerivedMatchingWhenEnabled(t *testing.T) {
 	src := source("p", "billing", "raw_invoices")
 	stg := node("p", "stg_invoices", []string{"source.p.billing.raw_invoices"},

@@ -12,16 +12,8 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// Apply folds provider documentation into the loaded projects, before the graph
-// is built and anything is resolved.
-//
-// A documented source becomes a **catalog entry** rather than a parallel
-// mechanism: a catalog already says what columns a relation has, in what order
-// and with what types and comments, and the resolver already reads one. What a
-// catalog has no room for — meta, tags, labels, a policy tag — goes onto the
-// source's manifest columns, which is where inheritance reads from.
-//
-// Returns the warnings worth printing.
+// Apply folds provider documentation into the loaded projects, before the graph is
+// built, and returns the warnings worth printing.
 func Apply(set *Set, sources []*dbt.Node, cfg config.Resolved) []string {
 	if set.Len() == 0 || len(sources) == 0 {
 		return nil
@@ -42,8 +34,7 @@ func applyOne(n *dbt.Node, doc *Doc, cfg config.Resolved) []string {
 	var warnings []string
 	labels := cfg.SourceLabels
 
-	// A description written by hand always wins: this tool never overwrites a
-	// person.
+	// A description written by hand always wins.
 	if n.Description == "" {
 		n.Description = doc.Description
 	}
@@ -71,8 +62,8 @@ func applyOne(n *dbt.Node, doc *Doc, cfg config.Resolved) []string {
 		}
 		index := c.Index
 		if index == 0 {
-			// No opinion about ordinals: fall back to the listed order, since a
-			// catalog with every index at zero would sort alphabetically.
+			// No opinion about ordinals: fall back to the listed order, since a catalog
+			// with every index at zero would sort alphabetically.
 			index = i + 1
 		}
 		entry.Columns[c.Name] = dbt.CatalogColumn{
@@ -88,16 +79,15 @@ func applyOne(n *dbt.Node, doc *Doc, cfg config.Resolved) []string {
 }
 
 // applyColumn writes the metadata a catalog cannot carry onto the source's own
-// manifest column, creating it if the source's YAML does not mention it yet.
 func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 	labels := cfg.SourceLabels
 	kept, dropped := filterLabels(c.Labels, labels)
 
 	col := n.Column(c.Name, cfg.CaseInsensitive)
 	if col == nil {
-		// An entry is created so inheritance downstream can see the column at
-		// all; the description stays on the catalog side, where the existing
-		// precedence already ranks a warehouse comment below hand-written text.
+		// An entry is created so inheritance downstream can see the column at all; the
+		// description stays on the catalog side, where precedence already ranks a
+		// warehouse comment below hand-written text.
 		col = &dbt.Column{Name: c.Name, DataType: c.DataType}
 		if n.Columns == nil {
 			n.Columns = map[string]*dbt.Column{}
@@ -107,9 +97,8 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 	}
 
 	// Written onto the manifest column rather than left as a catalog comment:
-	// `columns.comments` defaults to "new", which would skip a column the source
-	// YAML already lists — and for an external source that is wrong, since
-	// nothing upstream exists. Hand-written text still wins; this fills blanks.
+	// `columns.comments` defaults to "new", which would skip a column the source YAML
+	// already lists — wrong for an external source, since nothing upstream exists.
 	if col.Description == "" {
 		col.Description = c.Description
 	}
@@ -121,7 +110,7 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 
 	// Extra keys are carried only when the project asked for them by name, so a
 	// provider reporting a policy tag into a project that never configured
-	// `inheritance.extra_keys` writes nothing and surprises nobody.
+	// `inheritance.extra_keys` writes nothing.
 	for _, key := range cfg.ExtraKeys {
 		v, ok := c.Extra[key]
 		if !ok || v == nil {
@@ -137,17 +126,14 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 
 	if labels.Routed() {
 		// Into the manifest column, so a label travels downstream exactly as a
-		// description does. Stopping that is not done here: `propagate.column`
-		// adds the key to the skip list inheritance already consults.
+		// description does. `propagate.column` stops that via the skip list.
 		applyColumnLabels(col, kept, labels)
 	}
 	return dropped
 }
 
-// attachCatalog files an entry under the node's unique_id, creating the
-// project's catalog if `dbt docs generate` was never run. An entry already
-// there wins: a real catalog is the warehouse's own answer, and a provider
-// should not quietly replace it.
+// attachCatalog files an entry under the node's unique_id, creating the project's
+// catalog if `dbt docs generate` was never run.
 func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	if n.Project == nil {
 		return
@@ -172,9 +158,7 @@ func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	c.Invalidate()
 }
 
-// applyNodeLabels routes a relation's own labels onto the source entry. These
-// never travel — node meta is not inherited by anything here — and should not:
-// a label saying who pays for a table is false once copied to another dataset.
+// applyNodeLabels routes a relation's own labels onto the source entry.
 func applyNodeLabels(n *dbt.Node, labels map[string]string, l config.ResolvedLabels) {
 	if len(labels) == 0 {
 		return
@@ -223,8 +207,7 @@ func RenderTags(labels map[string]string, l config.ResolvedLabels) []string {
 	for _, k := range sortedKeys(labels) {
 		v := labels[k]
 		if v == "" {
-			// BigQuery permits a label with no value, and `owner:` is not a
-			// useful tag.
+			// BigQuery permits a label with no value, and `owner:` is not a useful tag.
 			out = append(out, k)
 			continue
 		}
@@ -243,9 +226,9 @@ func labelMap(labels map[string]string) *dbt.OrderedMap {
 	return m
 }
 
-// filterLabels applies the include and exclude patterns, and reports the keys
-// dropped for an unusable name rather than by configuration — a label key that
-// is not a glob-matchable string is the provider's bug and worth saying.
+// filterLabels applies the include and exclude patterns, and reports keys
+// dropped for an unusable name rather than by configuration — the provider's
+// bug, and worth saying.
 func filterLabels(labels map[string]string, l config.ResolvedLabels) (map[string]string, []string) {
 	if len(labels) == 0 {
 		return nil, nil
@@ -306,8 +289,7 @@ func setMetaIfAbsent(col *dbt.Column, key string, value any) {
 }
 
 // RequestFor turns the external sources into the request a provider receives,
-// along with the dbt projects they belong to so the provider can authenticate
-// the way dbt does.
+// with the dbt projects they belong to so it can authenticate as dbt does.
 func RequestFor(nodes []*dbt.Node, target string) ([]RequestProject, []RequestSource) {
 	sources := make([]RequestSource, 0, len(nodes))
 	projects := make([]RequestProject, 0, 2)
@@ -342,8 +324,8 @@ func RequestFor(nodes []*dbt.Node, target string) ([]RequestProject, []RequestSo
 	return projects, sources
 }
 
-// profileName falls back to the project name, which is what dbt does when
-// dbt_project.yml has no `profile:` key.
+// profileName falls back to the project name, as dbt does when dbt_project.yml
+// has no `profile:` key.
 func profileName(p *dbt.Project) string {
 	if p.Profile != "" {
 		return p.Profile
@@ -351,10 +333,8 @@ func profileName(p *dbt.Project) string {
 	return p.Name
 }
 
-// ProfilesDir reproduces dbt's own search for profiles.yml: DBT_PROFILES_DIR,
-// then the project directory, then ~/.dbt. Reproduced rather than left to the
-// provider so every provider agrees, and so the answer is visible in the
-// request when one of them gets it wrong.
+// ProfilesDir reproduces dbt's own search for profiles.yml: DBT_PROFILES_DIR, then the
+// project directory, then ~/.dbt.
 func ProfilesDir(projectRoot string) string {
 	if dir := os.Getenv("DBT_PROFILES_DIR"); dir != "" {
 		return dir
@@ -371,10 +351,9 @@ func ProfilesDir(projectRoot string) string {
 	return filepath.Join(home, ".dbt")
 }
 
-// Target is the profiles.yml target to use, following dbt's own precedence:
-// an explicit --target, then DBT_TARGET, then whatever profiles.yml says is
-// default — which is the provider's to discover, so an empty string is passed
-// through rather than guessed at.
+// Target follows dbt's precedence: an explicit --target, then DBT_TARGET, then
+// whatever profiles.yml calls default — the provider's to discover, so an empty
+// string is passed through rather than guessed at.
 func Target(explicit string) string {
 	if explicit != "" {
 		return explicit

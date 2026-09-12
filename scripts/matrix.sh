@@ -18,14 +18,11 @@ export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT}/.gocache/uv-cache}"
 mkdir -p "${TMPDIR}"
 
-# dbt writes logs and profile state under $HOME, so each row below redirects it
-# to a scratch directory. Anything that needs the real one — finding the Docker
-# socket, most of all — has to have taken a copy first.
+# dbt writes logs and profile state under $HOME, so each row below redirects it to a
+# scratch directory.
 REAL_HOME="${HOME}"
 
-# Entries are `dbt-core:dbt-duckdb:python`. All three are pinned; testdata/matrix
-# /README.md explains why, and which artifact boundary each version straddles.
-# `local` captures the repository's own .venv without building an environment.
+# Entries are `dbt-core:dbt-duckdb:python`.
 VERSIONS=(
   "1.8.9:1.8.4:3.11"
   "1.9.0:1.9.0:3.11"
@@ -56,11 +53,63 @@ UV="$(find_uv)" || {
   exit 1
 }
 
-rm -rf "${WORK}"
-mkdir -p "${WORK}"
-
 built=()
 skipped=()
+
+# make_env builds a throwaway environment: dbt pins dbt-core hard, so no two
+# rows can share one. Usage: make_env ENV_DIR PYTHON LOG PACKAGE...
+make_env() {
+  local env_dir=$1 python=$2 log=$3
+  shift 3
+  "${UV}" venv --python "${python}" "${env_dir}" >>"${log}" 2>&1 &&
+    "${UV}" pip install --python "${env_dir}/bin/python" --quiet "$@" >>"${log}" 2>&1
+}
+
+# scratch_home redirects $HOME for a row and returns its run directory, freshly
+# copied from the named fixture. Usage: scratch_home SUFFIX FIXTURE RUN_DIR
+scratch_home() {
+  rm -rf "$3"
+  cp -R "$2" "$3"
+  export HOME="${WORK}/home-$1"
+  mkdir -p "${HOME}"
+}
+
+meta_field() { # ENV_DIR MANIFEST FIELD
+  "$1/bin/python" -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"][sys.argv[2]])' "$2" "$3"
+}
+
+# capture commits one row's artifacts and reports what produced them, rather than
+# trusting the directory name: the adapter version requested is not always the
+# dbt-core version used.
+capture() {
+  local out=$1 env_dir=$2 manifest=$3 catalog=$4 adapter=$5 adapter_version=$6
+  shift 6
+  rm -rf "${out}"
+  mkdir -p "${out}"
+  gzip -9 -c "${manifest}" >"${out}/manifest.json.gz"
+  gzip -9 -c "${catalog}" >"${out}/catalog.json.gz"
+
+  local dbt_version schema_version
+  dbt_version="$(meta_field "${env_dir}" "${manifest}" dbt_version)"
+  schema_version="$(meta_field "${env_dir}" "${manifest}" dbt_schema_version)"
+  "${env_dir}/bin/python" "${ROOT}/scripts/lib/write_meta.py" "${out}/meta.json" \
+    "${adapter}" "${adapter_version}" "${dbt_version}" "${schema_version}" "$@"
+
+  printf '    dbt-core %-10s schema %-8s %s\n' "${dbt_version}" \
+    "$(basename "${schema_version}" .json)" \
+    "$(du -kh "${out}" | tail -1 | awk '{print $1}')"
+}
+
+dbt_build() { # ENV_DIR RUN_DIR
+  cd "$2"
+  DBT_PROFILES_DIR="$2" "$1/bin/dbt" seed --quiet
+  DBT_PROFILES_DIR="$2" "$1/bin/dbt" run --quiet
+  DBT_PROFILES_DIR="$2" "$1/bin/dbt" docs generate --quiet
+}
+
+rm -rf "${WORK}"
+mkdir -p "${WORK}"
 
 for entry in "${VERSIONS[@]}"; do
   if [[ "${entry}" == "local" ]]; then
@@ -82,79 +131,28 @@ for entry in "${VERSIONS[@]}"; do
     printf '==> dbt-core %s with dbt-duckdb %s on Python %s\n' "${core}" "${adapter}" "${python}"
   fi
 
-  version="${core}"
   id="duckdb-core${core}"
   run_dir="${WORK}/run-${core}"
   log="${WORK}/${id}.log"
 
-  # Each version gets a throwaway environment. dbt pins dbt-core hard, so they
-  # cannot share one.
   if [[ "${entry}" != "local" ]] &&
-     { ! "${UV}" venv --python "${python}" "${env_dir}" >>"${log}" 2>&1 ||
-       ! "${UV}" pip install --python "${env_dir}/bin/python" --quiet \
-           "dbt-core==${core}" "dbt-duckdb==${adapter}" >>"${log}" 2>&1; }; then
+     ! make_env "${env_dir}" "${python}" "${log}" "dbt-core==${core}" "dbt-duckdb==${adapter}"; then
     echo "    skipped: could not install (see ${log})"
     skipped+=("${entry} (install)")
     continue
   fi
 
-  rm -rf "${run_dir}"
-  cp -R "${PROJECT}" "${run_dir}"
+  scratch_home "${core}" "${PROJECT}" "${run_dir}"
   export DBT_DITTO_MATRIX_DB="${run_dir}/matrix.duckdb"
 
-  # dbt writes logs and profile state under $HOME; keep it in the scratch dir.
-  export HOME="${WORK}/home-${version}"
-  mkdir -p "${HOME}"
-
-  if ! (
-    cd "${run_dir}"
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" seed --quiet
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" run --quiet
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" docs generate --quiet
-  ) >>"${log}" 2>&1; then
+  if ! (dbt_build "${env_dir}" "${run_dir}") >>"${log}" 2>&1; then
     echo "    skipped: dbt failed (see ${log})"
     skipped+=("${entry} (dbt)")
     continue
   fi
 
-  out="${ARTIFACTS}/${id}"
-  rm -rf "${out}"
-  mkdir -p "${out}"
-
-  # Committed gzipped: a manifest is mostly macro definitions dbt-ditto never
-  # reads, and both readers understand `.gz`.
-  gzip -9 -c "${run_dir}/target/manifest.json" >"${out}/manifest.json.gz"
-  gzip -9 -c "${run_dir}/target/catalog.json" >"${out}/catalog.json.gz"
-
-  # Record what actually produced these, rather than trusting the directory
-  # name: the adapter version requested is not always the dbt-core version used.
-  dbt_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_version"])' \
-    "${run_dir}/target/manifest.json")"
-  schema_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_schema_version"])' \
-    "${run_dir}/target/manifest.json")"
-
-  "${env_dir}/bin/python" - "${out}/meta.json" "${adapter}" "${dbt_version}" "${schema_version}" <<'PY'
-import json, sys
-path, adapter_version, dbt_version, schema_version = sys.argv[1:5]
-with open(path, "w") as fh:
-    json.dump(
-        {
-            "adapter": "duckdb",
-            "adapter_version": adapter_version,
-            "dbt_version": dbt_version,
-            "dbt_schema_version": schema_version,
-        },
-        fh,
-        indent=2,
-    )
-    fh.write("\n")
-PY
-
-  size="$(du -kh "${out}" | tail -1 | awk '{print $1}')"
-  printf '    dbt-core %-10s schema %-8s %s\n' "${dbt_version}" \
-    "$(basename "${schema_version}" .json)" "${size}"
+  capture "${ARTIFACTS}/${id}" "${env_dir}" "${run_dir}/target/manifest.json" \
+    "${run_dir}/target/catalog.json" duckdb "${adapter}"
   built+=("${entry}")
 
   # Never delete the repository's own environment.
@@ -180,18 +178,14 @@ for entry in ${SNOWFLAKE[@]+"${SNOWFLAKE[@]}"}; do
   printf '==> dbt-core %s with dbt-snowflake %s on Python %s (via fakesnow)\n' \
     "${core}" "${adapter}" "${python}"
 
-  if ! "${UV}" venv --python "${python}" "${env_dir}" >>"${log}" 2>&1 ||
-     ! "${UV}" pip install --python "${env_dir}/bin/python" --quiet \
-         "dbt-core==${core}" "dbt-snowflake==${adapter}" fakesnow >>"${log}" 2>&1; then
+  if ! make_env "${env_dir}" "${python}" "${log}" \
+       "dbt-core==${core}" "dbt-snowflake==${adapter}" fakesnow; then
     echo "    skipped: could not install (see ${log})"
     skipped+=("${entry} (snowflake install)")
     continue
   fi
 
-  rm -rf "${run_dir}"
-  cp -R "${ROOT}/testdata/matrix/snowflake" "${run_dir}"
-  export HOME="${WORK}/home-sf-${core}"
-  mkdir -p "${HOME}"
+  scratch_home "sf-${core}" "${ROOT}/testdata/matrix/snowflake" "${run_dir}"
 
   if ! (
     cd "${run_dir}"
@@ -206,40 +200,8 @@ for entry in ${SNOWFLAKE[@]+"${SNOWFLAKE[@]}"}; do
     continue
   fi
 
-  out="${ARTIFACTS}/${id}"
-  rm -rf "${out}"
-  mkdir -p "${out}"
-  gzip -9 -c "${run_dir}/target/manifest.json" >"${out}/manifest.json.gz"
-  gzip -9 -c "${run_dir}/target/catalog.json" >"${out}/catalog.json.gz"
-
-  dbt_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_version"])' \
-    "${run_dir}/target/manifest.json")"
-  schema_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_schema_version"])' \
-    "${run_dir}/target/manifest.json")"
-
-  "${env_dir}/bin/python" - "${out}/meta.json" "${adapter}" "${dbt_version}" "${schema_version}" <<'PY'
-import json, sys
-path, adapter_version, dbt_version, schema_version = sys.argv[1:5]
-with open(path, "w") as fh:
-    json.dump(
-        {
-            "adapter": "snowflake",
-            "adapter_version": adapter_version,
-            "dbt_version": dbt_version,
-            "dbt_schema_version": schema_version,
-            "emulated_by": "fakesnow",
-        },
-        fh,
-        indent=2,
-    )
-    fh.write("\n")
-PY
-
-  printf '    dbt-core %-10s schema %-8s %s\n' "${dbt_version}" \
-    "$(basename "${schema_version}" .json)" \
-    "$(du -kh "${out}" | tail -1 | awk '{print $1}')"
+  capture "${ARTIFACTS}/${id}" "${env_dir}" "${run_dir}/target/manifest.json" \
+    "${run_dir}/target/catalog.json" snowflake "${adapter}" "emulated_by=fakesnow"
   built+=("${entry} (snowflake)")
 
   [[ -n "${KEEP_ENVS:-}" ]] || rm -rf "${env_dir}"
@@ -255,10 +217,7 @@ fi
 PG_CONTAINER="dbt-ditto-matrix-pg"
 PG_PORT="${DBT_DITTO_PG_PORT:-55432}"
 
-# Point the client straight at the daemon's socket. Relying on the default
-# means relying on `~/.docker/contexts`, and on a Colima install the socket is
-# not at /var/run/docker.sock anyway; naming it explicitly also keeps the script
-# working when $HOME has been redirected, which it is below.
+# Point the client straight at the daemon's socket.
 if [[ -z "${DOCKER_HOST:-}" ]]; then
   for candidate in \
       "${REAL_HOME}/.colima/default/docker.sock" \
@@ -291,9 +250,8 @@ for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
   printf '==> dbt-core %s with dbt-postgres %s on Python %s (in Docker)\n' \
     "${core}" "${adapter}" "${python}"
 
-  if ! "${UV}" venv --python "${python}" "${env_dir}" >>"${log}" 2>&1 ||
-     ! "${UV}" pip install --python "${env_dir}/bin/python" --quiet \
-         "dbt-core==${core}" "dbt-postgres==${adapter}" >>"${log}" 2>&1; then
+  if ! make_env "${env_dir}" "${python}" "${log}" \
+       "dbt-core==${core}" "dbt-postgres==${adapter}"; then
     echo "    skipped: could not install (see ${log})"
     skipped+=("${entry} (postgres install)")
     continue
@@ -326,58 +284,19 @@ for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
     continue
   fi
 
-  rm -rf "${run_dir}"
-  cp -R "${ROOT}/testdata/matrix/postgres" "${run_dir}"
-  export HOME="${WORK}/home-pg-${core}"
+  scratch_home "pg-${core}" "${ROOT}/testdata/matrix/postgres" "${run_dir}"
   export DBT_DITTO_PG_HOST=127.0.0.1
   export DBT_DITTO_PG_PORT="${PG_PORT}"
-  mkdir -p "${HOME}"
 
-  if ! (
-    cd "${run_dir}"
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" seed --quiet
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" run --quiet
-    DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/dbt" docs generate --quiet
-  ) >>"${log}" 2>&1; then
+  if ! (dbt_build "${env_dir}" "${run_dir}") >>"${log}" 2>&1; then
     echo "    skipped: dbt failed (see ${log})"
     skipped+=("${entry} (postgres dbt)")
     stop_postgres
     continue
   fi
 
-  out="${ARTIFACTS}/${id}"
-  rm -rf "${out}"
-  mkdir -p "${out}"
-  gzip -9 -c "${run_dir}/target/manifest.json" >"${out}/manifest.json.gz"
-  gzip -9 -c "${run_dir}/target/catalog.json" >"${out}/catalog.json.gz"
-
-  dbt_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_version"])' \
-    "${run_dir}/target/manifest.json")"
-  schema_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_schema_version"])' \
-    "${run_dir}/target/manifest.json")"
-
-  "${env_dir}/bin/python" - "${out}/meta.json" "${adapter}" "${dbt_version}" "${schema_version}" <<'PY'
-import json, sys
-path, adapter_version, dbt_version, schema_version = sys.argv[1:5]
-with open(path, "w") as fh:
-    json.dump(
-        {
-            "adapter": "postgres",
-            "adapter_version": adapter_version,
-            "dbt_version": dbt_version,
-            "dbt_schema_version": schema_version,
-        },
-        fh,
-        indent=2,
-    )
-    fh.write("\n")
-PY
-
-  printf '    dbt-core %-10s schema %-8s %s\n' "${dbt_version}" \
-    "$(basename "${schema_version}" .json)" \
-    "$(du -kh "${out}" | tail -1 | awk '{print $1}')"
+  capture "${ARTIFACTS}/${id}" "${env_dir}" "${run_dir}/target/manifest.json" \
+    "${run_dir}/target/catalog.json" postgres "${adapter}"
   built+=("${entry} (postgres)")
 
   stop_postgres
@@ -404,18 +323,14 @@ for entry in ${BIGQUERY[@]+"${BIGQUERY[@]}"}; do
   printf '==> dbt-core %s with dbt-bigquery %s on Python %s (parse only)\n' \
     "${core}" "${adapter}" "${python}"
 
-  if ! "${UV}" venv --python "${python}" "${env_dir}" >>"${log}" 2>&1 ||
-     ! "${UV}" pip install --python "${env_dir}/bin/python" --quiet \
-         "dbt-core==${core}" "dbt-bigquery==${adapter}" >>"${log}" 2>&1; then
+  if ! make_env "${env_dir}" "${python}" "${log}" \
+       "dbt-core==${core}" "dbt-bigquery==${adapter}"; then
     echo "    skipped: could not install (see ${log})"
     skipped+=("${entry} (bigquery install)")
     continue
   fi
 
-  rm -rf "${run_dir}"
-  cp -R "${ROOT}/testdata/matrix/bigquery" "${run_dir}"
-  export HOME="${WORK}/home-bq-${core}"
-  mkdir -p "${HOME}"
+  scratch_home "bq-${core}" "${ROOT}/testdata/matrix/bigquery" "${run_dir}"
 
   # The endpoint is never reached: parsing does not open a connection. It is
   # passed so the client can be constructed without hunting for credentials.
@@ -429,41 +344,10 @@ for entry in ${BIGQUERY[@]+"${BIGQUERY[@]}"}; do
     continue
   fi
 
-  out="${ARTIFACTS}/${id}"
-  rm -rf "${out}"
-  mkdir -p "${out}"
-  gzip -9 -c "${run_dir}/target/manifest.json" >"${out}/manifest.json.gz"
-  gzip -9 -c "${ROOT}/testdata/matrix/bigquery/catalog.json" >"${out}/catalog.json.gz"
-
-  dbt_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_version"])' \
-    "${run_dir}/target/manifest.json")"
-  schema_version="$("${env_dir}/bin/python" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["dbt_schema_version"])' \
-    "${run_dir}/target/manifest.json")"
-
-  "${env_dir}/bin/python" - "${out}/meta.json" "${adapter}" "${dbt_version}" "${schema_version}" <<'PY'
-import json, sys
-path, adapter_version, dbt_version, schema_version = sys.argv[1:5]
-with open(path, "w") as fh:
-    json.dump(
-        {
-            "adapter": "bigquery",
-            "adapter_version": adapter_version,
-            "dbt_version": dbt_version,
-            "dbt_schema_version": schema_version,
-            "manifest_from": "dbt parse",
-            "catalog_from": "hand-built, see testdata/matrix/bigquery/catalog.json",
-        },
-        fh,
-        indent=2,
-    )
-    fh.write("\n")
-PY
-
-  printf '    dbt-core %-10s schema %-8s %s\n' "${dbt_version}" \
-    "$(basename "${schema_version}" .json)" \
-    "$(du -kh "${out}" | tail -1 | awk '{print $1}')"
+  capture "${ARTIFACTS}/${id}" "${env_dir}" "${run_dir}/target/manifest.json" \
+    "${ROOT}/testdata/matrix/bigquery/catalog.json" bigquery "${adapter}" \
+    "manifest_from=dbt parse" \
+    "catalog_from=hand-built, see testdata/matrix/bigquery/catalog.json"
   built+=("${entry} (bigquery)")
 
   [[ -n "${KEEP_ENVS:-}" ]] || rm -rf "${env_dir}"

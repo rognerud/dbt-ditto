@@ -8,10 +8,9 @@ import (
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 )
 
-// dbt resolves `+dbt-ditto-path:` into each node's config, so the dbt_project.yml
-// rules are only a fallback — but a fallback that never matches is not one. The
-// keys under `models:` are package names and a node's fqn starts with its
-// package, so the project's own package has to be stripped from both sides.
+// dbt resolves `+dbt-ditto-path:` into each node's config, so the
+// dbt_project.yml rules are only a fallback — but one that never matches is not
+// a fallback, hence stripping the project's own package from both sides.
 func TestPathRulesFromDbtProjectYAMLMatchTheirNodes(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "dbt_project.yml", `name: demo
