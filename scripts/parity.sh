@@ -27,6 +27,21 @@ export DBT_DITTO_DB="${ROOT}/testdata/warehouse.duckdb"
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 mkdir -p "${TMPDIR}"
 
+# The two tools learn a column's type by different routes, and only one of them
+# reads a file that is in the repository. dbt-ditto reads the committed
+# target/catalog.json; dbt-osmosis asks the adapter, which means the fixture has
+# to exist as real tables in DuckDB. That file is generated and not committed,
+# so on a clean checkout — CI, every time — it is simply absent, and DuckDB
+# obligingly creates an empty database rather than failing. dbt-osmosis then
+# finds no columns anywhere and writes bare `- name: <model>` scaffolding, and
+# the diff reads as though dbt-ditto invented every column in the fixture.
+if [[ ! -f "${DBT_DITTO_DB}" ]]; then
+  echo "==> building the fixture warehouse"
+  mkdir -p "${ROOT}/.gocache"
+  "${ROOT}/scripts/build-fixture.sh" >"${ROOT}/.gocache/parity-fixture.log" 2>&1 ||
+    { cat "${ROOT}/.gocache/parity-fixture.log"; exit 1; }
+fi
+
 rm -rf "${WORK}"
 mkdir -p "${WORK}/home"
 cp -R "${ROOT}/testdata/projects" "${WORK}/osmosis"
