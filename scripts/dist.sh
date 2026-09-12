@@ -66,10 +66,16 @@ for target in "${TARGETS[@]}"; do
     fi )
   rm -rf "${stage}"
 
+  # du rather than `ls -lh`: it reports the size directly instead of a column of
+  # a listing, and -h is understood by both the BSD and GNU versions.
   printf '  %-24s %s\n' "${target}" \
-    "$(ls -lh "${DIST}/${name}".* | awk '{print $5}')"
+    "$(du -h "${DIST}/${name}".* | awk '{print $1}')"
 done
 
-( cd "${DIST}" && shasum -a 256 ./*.tar.gz ./*.zip >checksums.txt 2>/dev/null || true )
+(
+  cd "${DIST}" || exit 1
+  # Missing archives are tolerated because not every run builds every target.
+  shasum -a 256 ./*.tar.gz ./*.zip >checksums.txt 2>/dev/null || true
+)
 echo
 echo "archives and checksums in ${DIST}"

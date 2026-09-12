@@ -1,0 +1,69 @@
+# release-drafter keeps a draft release on `main` up to date: the next version
+# number, and the notes, both derived from the pull requests merged since the
+# last release.
+#
+# The draft is the running record of what would ship. Publishing it is what
+# creates the tag, and the tag is what triggers release.yml. Nothing is tagged
+# before that point, so `main` is always releasable and never accidentally
+# released.
+#
+# The version comes from the labels on the merged PRs — see version-resolver
+# below — so the only thing that has to be right at merge time is the label.
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: ":boom: Breaking changes"
+    label: "breaking"
+  - title: ":rocket: Features"
+    label: "enhancement"
+  - title: ":beetle: Fixes"
+    label: "bug"
+  - title: ":fire: Removals and deprecations"
+    label: "removal"
+  - title: ":racehorse: Performance"
+    label: "performance"
+  - title: ":books: Documentation"
+    label: "documentation"
+  - title: ":hammer: Refactoring"
+    label: "refactoring"
+  - title: ":rotating_light: Testing"
+    label: "testing"
+  - title: ":construction_worker: Build and CI"
+    labels:
+      - "ci"
+      - "build"
+  - title: ":package: Dependencies"
+    label: "dependencies"
+
+# A PR with none of the version labels is a patch. That is the safe default:
+# the failure mode is a release number lower than it should be, which is
+# correctable, rather than a major bump nobody meant.
+version-resolver:
+  major:
+    labels: ["breaking"]
+  minor:
+    labels: ["enhancement", "removal"]
+  patch:
+    labels: ["bug", "performance", "documentation", "refactoring", "testing", "ci", "build", "dependencies"]
+  default: patch
+
+exclude-labels:
+  - "skip-changelog"
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+# Characters that would otherwise be read as markdown in a PR title.
+change-title-escapes: '\<*_&`#@'
+
+template: |
+  ## What changed
+
+  $CHANGES
+
+  **Full diff**: https://github.com/rognerud/dbt-ditto/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+
+  ---
+
+  Publishing this release creates the tag, which builds the archives and the
+  platform wheels, publishes to PyPI, and mirrors the dbt package.

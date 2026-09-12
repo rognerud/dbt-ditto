@@ -1,0 +1,37 @@
+name: draft release
+
+# Keeps the draft release on `main` current: every merge updates its notes and
+# recomputes the next version from the labels on the pull requests merged since
+# the last release. See .github/release-drafter.yml.
+#
+# This never tags and never publishes. Publishing the draft, by hand, is what
+# creates the tag — and that tag is what release.yml waits for.
+
+on:
+  push:
+    branches: [main]
+  # Re-runs on label changes so the version in the draft reflects a label that
+  # was corrected after the fact.
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draft-release
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      # Writing the draft release, and reading pull requests to build its notes.
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: release-drafter/release-drafter@b1476f6e6eb133afa41ed8589daba6dc69b4d3f5 # v6.1.0
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

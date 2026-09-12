@@ -1,12 +1,20 @@
 name: release
 
+# Publishing the draft release is the release. GitHub creates the tag at that
+# moment — there is no tag before it — and this workflow turns that tag into
+# archives, wheels, a PyPI upload and the dbt package mirror.
+#
+# The draft itself is maintained by draft-release.yml, which computes the
+# version from pull request labels. So the only manual act in a release is
+# pressing Publish on notes that have been accumulating since the last one.
+
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (must already exist)"
+        description: "Existing tag to build (re-runs a release)"
         required: true
 
 permissions:
@@ -16,69 +24,105 @@ env:
   GOFLAGS: -mod=vendor
 
 jobs:
-  # Nothing is published until the tag, the wheel version and the dbt package
-  # version agree and the suite passes. A release that ships three different
-  # version numbers cannot be un-published from PyPI.
-  verify:
+  # The version lives in three places by hand and the tag is the authority, so
+  # the files are brought to the tag rather than the release being refused for
+  # disagreeing with them. `main` ends up recording what was released.
+  version:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+          ref: main
 
       - id: tag
         run: echo "tag=${TAG:-${GITHUB_REF_NAME}}" >>"${GITHUB_OUTPUT}"
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
 
+      - name: write the released version into the files that carry it
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sed -i -E "0,/^version = \".*\"/s//version = \"${version}\"/" pyproject.toml
+          sed -i -E "0,/^version: \".*\"/s//version: \"${version}\"/" packaging/dbt-ditto/dbt_project.yml
+
+      # Runs after the rewrite, so it is checking that the rewrite worked rather
+      # than that someone remembered. A tag is the one thing here that cannot be
+      # taken back, so nothing is built until this passes.
       - run: ./scripts/check-versions.sh "${{ steps.tag.outputs.tag }}"
-      - run: go test ./...
+
+      # Publishing the draft creates the tag at main's head, which is the commit
+      # *before* the bump above. Left alone, the tag would point at files
+      # claiming the previous version, and everything downstream that checks out
+      # the tag — the wheels, the mirror — would disagree with it.
+      #
+      # So the tag is moved onto the bump commit. Force-moving a tag is
+      # ordinarily something to avoid, and it is safe here for one reason: this
+      # runs seconds after the tag was created and before anything has been
+      # built from it, so there is nothing published that could already have
+      # been fetched at the old position.
+      - name: commit the bump and bring the tag with it
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml packaging/dbt-ditto/dbt_project.yml
+          if git diff --cached --quiet; then
+            echo "already at ${TAG}; nothing to move"
+            exit 0
+          fi
+          git commit -m "release ${TAG}"
+          git push origin HEAD:main
+          git tag -f "${TAG}"
+          git push -f origin "refs/tags/${TAG}"
 
   build:
-    needs: verify
+    needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-          ref: ${{ needs.verify.outputs.tag }}
-      - uses: actions/setup-go@v5
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version-file: go.mod
           cache: true
 
-      # Both of these cross-compile every target from this one runner: no cgo,
-      # one pure-Go dependency.
+      # Both cross-compile every target from this one runner: no cgo, two
+      # pure-Go dependencies.
       - name: archives
-        run: VERSION="${{ needs.verify.outputs.tag }}" ./scripts/dist.sh
+        run: VERSION="${{ needs.version.outputs.tag }}" ./scripts/dist.sh
 
       - name: wheels
-        run: python3 packaging/pypi/build_wheels.py --version "${{ needs.verify.outputs.tag }}"
+        run: python3 packaging/pypi/build_wheels.py --version "${{ needs.version.outputs.tag }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: archives
           path: dist/*
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels
           path: dist/pypi/*.whl
           if-no-files-found: error
 
   # Trusted publishing: PyPI verifies this workflow's OIDC identity, so there is
-  # no API token to store or leak. Configure it once at
-  # https://pypi.org/manage/project/dbt-ditto/settings/publishing/ with
-  # workflow `release.yml` and environment `pypi`.
+  # no API token stored anywhere. Before the first release this has to be
+  # registered as a *pending* publisher, since the project does not exist yet.
   pypi:
-    needs: [verify, build]
+    needs: [version, build]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -86,30 +130,39 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wheels
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
 
-  github-release:
-    needs: [verify, build]
+  # The release already exists — publishing its draft is what got us here — so
+  # the archives are attached to it rather than a new one being created.
+  assets:
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: archives
           path: dist
-
-      - name: create the release
+      - name: attach the archives
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
-        run: |
-          gh release create "${TAG}" \
-            --title "${TAG}" \
-            --generate-notes \
-            dist/*
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "${TAG}" dist/* --clobber
+
+  # Called rather than left to fire on the tag: a tag created by GitHub's own
+  # token does not trigger `on: push: tags`, so a tag-triggered mirror would
+  # silently never run.
+  mirror:
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mirror-dbt-ditto.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    secrets: inherit

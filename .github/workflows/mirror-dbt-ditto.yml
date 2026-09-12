@@ -19,14 +19,23 @@ name: mirror dbt-ditto
 #
 # Indexing is hourly after that, so later releases need nothing but a tag.
 
+# Called by release.yml rather than triggered by the tag. GitHub creates the tag
+# when the draft release is published, using its own token, and a tag pushed
+# that way does not fire `on: push: tags` — so a tag-triggered mirror would
+# silently never run.
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to mirror (must already exist)"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to mirror (must already exist)"
         required: true
+        type: string
 
 permissions:
   contents: read
@@ -39,15 +48,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref_name }}
-
-      - id: tag
-        run: echo "tag=${TAG:-${GITHUB_REF_NAME}}" >>"${GITHUB_OUTPUT}"
-        env:
-          TAG: ${{ inputs.tag }}
+          ref: ${{ inputs.tag }}
 
       - name: the package version must match the tag
-        run: ./scripts/check-versions.sh "${{ steps.tag.outputs.tag }}"
+        run: ./scripts/check-versions.sh "${{ inputs.tag }}"
 
       - name: check out the mirror
         uses: actions/checkout@v4
@@ -70,7 +74,7 @@ jobs:
       - name: commit and tag
         working-directory: mirror
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ inputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

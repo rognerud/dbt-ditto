@@ -210,13 +210,43 @@ It is the only test of the macros: Go cannot reach them.
 
 ## Publishing
 
-Three workflows, all keyed off a `v*` tag, plus one guard:
+**A release is publishing a draft.** `draft-release.yml` runs
+[release-drafter](https://github.com/release-drafter/release-drafter) on every
+merge to `main`, keeping a draft release up to date: its notes come from the
+pull requests merged since the last release, and its version from their labels
+(`breaking` → major, `enhancement`/`removal` → minor, everything else including
+unlabelled → patch, per `.github/release-drafter.yml`).
+
+Nothing is tagged until someone presses Publish. That is what creates the tag,
+and the tag is what `release.yml` turns into archives, wheels, a PyPI upload and
+the mirror. So `main` is always releasable and never accidentally released, and
+the release notes are written continuously rather than remembered at the end.
+
+The labels are part of the machinery, not decoration, which is why they live in
+`.github/labels.yml` and are synced by `labeler.yml` rather than being created
+by hand and drifting from the resolver that reads them.
+
+Two ordering facts that the workflows exist to work around:
+
+- **The tag is created at `main`'s head, before the version bump.** `release.yml`
+  rewrites `pyproject.toml` and `dbt_project.yml` from the tag, commits that to
+  `main`, and then **force-moves the tag onto the bump commit** — otherwise the
+  tag points at files claiming the previous version and everything downstream
+  that checks out the tag disagrees with it. Moving it is safe only because it
+  happens seconds after publication and before anything has been built.
+- **A tag created by GitHub's own token does not fire `on: push: tags`.** So the
+  mirror is a `workflow_call` invoked by `release.yml` rather than a
+  tag-triggered workflow, which would silently never run.
+
+The workflows:
 
 | | trigger | does |
 | --- | --- | --- |
-| `ci.yml` | push, PR | gofmt, vet, test on Linux and macOS, race, shellcheck, `dbt-package.sh`, live `parity.sh --check` |
-| `release.yml` | `v*` tag | version guard, `dist.sh` archives, wheels, PyPI via trusted publishing, GitHub release |
-| `mirror-dbt-ditto.yml` | `v*` tag | copies `packaging/dbt-ditto/` to the root of `rognerud/dbt_ditto` and tags it |
+| `ci.yml` | push, PR | gofmt, vet, test on Linux and macOS, race, shellcheck, provider tests, `dbt-package.sh`, live `parity.sh --check` |
+| `draft-release.yml` | push to `main`, PR labelled | release-drafter: updates the draft's notes and next version. Tags nothing |
+| `labeler.yml` | `.github/labels.yml` changes | syncs the labels release-drafter reads |
+| `release.yml` | draft release **published** | version bump + tag move, `dist.sh` archives, wheels, PyPI via trusted publishing, attaches assets, calls the mirror |
+| `mirror-dbt-ditto.yml` | called by `release.yml` | copies `packaging/dbt-ditto/` to the root of `rognerud/dbt_ditto` and tags it |
 | `scripts/check-versions.sh` | called by both | tag vs `pyproject.toml` vs `dbt_project.yml` vs the wheel's normalised version |
 
 **Order matters on the first release.** `run.py` falls back to
@@ -404,6 +434,15 @@ at all.
   (`internal/config/pyproject.go`). Giving the config structs a second set of
   `toml:` tags would be two sets to keep in step, and the one that drifts is the
   one nobody is testing.
+- **The fixture profiles read `DBT_DITTO_DB`, and the scripts export it.** This
+  project used to be called `loomsmosis`, and the three `profiles.yml` files
+  under `testdata/` were still asking for `LOOMSMOSIS_DB` long after every
+  script had been renamed to export `DBT_DITTO_DB`. Nothing caught it because
+  the only things that read those profiles — `dbt-package.sh`, `parity.sh`,
+  `matrix.sh` — need dbt, so `go test` is silent about it and the failure only
+  appears the first time CI runs one of them:
+  `Parsing Error: Env var required but not provided`. Rename both halves
+  together.
 - **`dbt.ExtraColumnKeys` is a package-level list read during decoding.** It has
   to be, because `encoding/json` gives an `UnmarshalJSON` method no way to be
   told anything. `runner.Run` sets it before `loadProjects`; setting it during a

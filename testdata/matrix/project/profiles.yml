@@ -3,6 +3,6 @@ matrix:
   outputs:
     dev:
       type: duckdb
-      path: "{{ env_var('LOOMSMOSIS_MATRIX_DB') }}"
+      path: "{{ env_var('DBT_DITTO_MATRIX_DB') }}"
       schema: main
       threads: 4

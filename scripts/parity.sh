@@ -78,10 +78,14 @@ echo "==> dbt-ditto: both projects"
 #     dbt-osmosis does not, so the annotation is turned off to compare like for
 #     like. It is inserted into the existing `inheritance:` block rather than
 #     appended, since a second top-level `inheritance:` key would be a duplicate.
+#
+# The replacement text spans two lines, and BSD sed will not take a literal
+# newline in a `s###` replacement any other way than a backslash followed by
+# one. Building the whole expression with $'...' keeps that escape inside a
+# single quoting context, rather than stitching three of them together mid-word.
+progenitor_off=$'s#^inheritance:$#inheritance:\\\n  progenitor: false#'
 {
-  sed -e 's#projects/#./#' \
-      -e 's#^inheritance:$#inheritance:\'$'\n''  progenitor: false#' \
-      "${ROOT}/testdata/dbt_ditto.yml"
+  sed -e 's#projects/#./#' -e "${progenitor_off}" "${ROOT}/testdata/dbt_ditto.yml"
   printf '\ncolumns:\n  comments: never\n\noutput:\n  comments: osmosis\n'
 } >"${WORK}/dbt-ditto/dbt_ditto.yml"
 GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \

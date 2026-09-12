@@ -4,12 +4,11 @@
 ![Go](https://img.shields.io/badge/go-1.24-00ADD8)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-〃 is the ditto mark: *same as above*. dbt-ditto propagates column documentation
-down the dbt DAG and writes it back into schema YAML, across project boundaries —
-a description is written once and every column downstream that means the same
-thing says ditto. It is a single static Go binary with two pure-Go dependencies
-(`gopkg.in/yaml.v3`, `github.com/BurntSushi/toml`): it reads the `manifest.json`
-and `catalog.json` dbt has already written, so it needs no dbt, no Python and no
+*same as above*. dbt-ditto propagates column documentation
+down the dbt graph and writes it back into the schema YAML files. 
+It is a single static Go binary with two pure-Go dependencies
+(`gopkg.in/yaml.v3`, `github.com/BurntSushi/toml`): 
+it reads the `manifest.json` and `catalog.json` dbt has already written, so it needs no dbt, no Python and no
 warehouse connection.
 
 ```mermaid
@@ -31,27 +30,20 @@ flowchart LR
 
 ## Status
 
-Active, pre-1.0. The feature set is complete and proven against the real
-dbt-osmosis; nothing has been tagged for release yet.
+Active, pre-1.0.
 
 ## Points of contact
 
 | | |
 |---|---|
-| Owner | Gisle Rognerud ([@rognerud](https://github.com/rognerud)) |
 | Contact | [GitHub issues](https://github.com/rognerud/dbt-ditto/issues) |
-| Source | <https://github.com/rognerud/dbt-ditto> |
 
 ## What it does
 
-Reads the dbt artifacts of one or more projects, resolves what each column's
+Reads the dbt artifacts, resolves what each column's
 documentation should be after inheritance, and edits the schema YAML in place —
 preserving comments and key order.
 
-- **dbt-osmosis' YAML management, reproduced byte for byte.** Column sync against
-  the warehouse catalog, description / meta / tag inheritance, and schema-file
-  organisation from `+dbt-osmosis:` path templates. Existing configuration is read
-  as-is; there is no migration.
 - **Inheritance across project boundaries**, for projects that use dbt-loom. This
   does *not* replace loom: injecting upstream nodes so a cross-project `ref()`
   compiles is still loom's job at dbt runtime. dbt-ditto runs afterwards, over
@@ -68,25 +60,25 @@ preserving comments and key order.
 - **Explicit directives** (`description: "Inherited: stg_customers.customer_id"`)
   for columns that were renamed, where no heuristic should be trusted to guess.
 - **A `--check` mode** that fails without writing, for CI.
+- **dbt-osmosis' YAML management, reproduced byte for byte.** Column sync against
+  the warehouse catalog, description / meta / tag inheritance, and schema-file
+  organisation from `+dbt-osmosis:` path templates. Existing configuration is read
+  as-is; there is no migration.
 
 ```sh
 dbt-ditto inherit path/to/project
 ```
 
-About 68× faster than dbt-osmosis on the same work, because it never re-parses
-the project — see [.agents/development.md](.agents/development.md#speed) for the
-measurements.
+It is really fast, approximately 50x faster than dbt-osmosis, because it never re-parses
+the project.
 
 ## Where configuration lives
 
 Searched for in the working directory and then each parent, first hit winning:
 `dbt_ditto.yml`, `dbt_ditto.yaml`, `.dbt_ditto.yml`, then `pyproject.toml` — the
-last only if it has a `[tool.dbt-ditto]` table, since almost every Python project
-has a `pyproject.toml` and almost none of them configure this tool. `-c PATH`
-names a file directly, in either format.
+last only if it has a `[tool.dbt-ditto]` table.
 
 ```toml
-# pyproject.toml — the same keys, spelled the way TOML spells them
 [tool.dbt-ditto]
 loom = true
 
@@ -104,10 +96,7 @@ config at all: schema-file placement from `+dbt-ditto-path:` / `+dbt-osmosis:` i
 `dbt_loom.config.yml`. `dbt-ditto inherit path/to/project` runs on those alone.
 
 ## Settling an argument: `dbt_ditto_definitive`
-
-Inheritance answers "what does this column mean?" by walking the DAG. That is
-the wrong tool when several ancestors disagree and the real answer is a decision
-somebody made. Write the decision down instead:
+Some times you just need to set the record straight.
 
 ```yaml
 columns:

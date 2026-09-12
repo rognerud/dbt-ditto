@@ -68,6 +68,15 @@ FOREIGN_WHEEL="${DIST}/dbt_ditto-${VERSION}-py3-none-${FOREIGN_TAG}.whl"
 
 fail() { echo "  FAIL: $*" >&2; exit 1; }
 
+# mode prints a file's permission string. The executable bit is the whole point
+# of this script — a wheel once shipped the binary without it, which uv
+# tolerated and pip turned into "permission denied" — so the mode is reported
+# rather than merely asserted. `stat` spells this differently on BSD and GNU,
+# and both run this script, so both spellings are tried.
+mode() {
+  stat -f '%Sp' "$1" 2>/dev/null || stat -c '%A' "$1"
+}
+
 # check_install <label> <venv> <install command...>
 check_install() {
   local label="$1" venv="$2"; shift 2
@@ -76,11 +85,11 @@ check_install() {
 
   local bin="${venv}/bin/dbt-ditto"
   [[ -f "${bin}" ]] || fail "${label}: no binary in ${venv}/bin"
-  [[ -x "${bin}" ]] || fail "${label}: binary is not executable ($(ls -l "${bin}" | awk '{print $1}'))"
+  [[ -x "${bin}" ]] || fail "${label}: binary is not executable ($(mode "${bin}"))"
 
   local out
   out="$("${bin}" version 2>&1 | head -1)" || fail "${label}: binary did not run"
-  echo "    ${out}  [$(ls -l "${bin}" | awk '{print $1}')]"
+  echo "    ${out}  [$(mode "${bin}")]"
 }
 
 "${UV}" venv --seed "${WORK}/uv-venv" >/dev/null 2>&1
