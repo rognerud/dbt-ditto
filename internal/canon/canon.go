@@ -58,12 +58,8 @@ func Dir(root string) error {
 
 // IsSchemaFile reports whether a file name is dbt schema YAML.
 func IsSchemaFile(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".yml", ".yaml":
-	default:
-		return false
-	}
-	return !skipNames[name]
+	ext := strings.ToLower(filepath.Ext(name))
+	return (ext == ".yml" || ext == ".yaml") && !skipNames[name]
 }
 
 // File canonicalises one schema file, in place.

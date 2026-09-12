@@ -3,9 +3,11 @@ package runner
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -82,7 +84,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	// Collected before anything is resolved: two declarations that disagree are a
 	// question only a person can answer, and asking halfway through would leave
 	// half the files written.
-	definitives, err := inherit.BuildDefinitives(graph, res.Fold)
+	definitives, err := inherit.BuildDefinitives(graph, resolved.Fold)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +102,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		to   string // repo-relative
 	}
 	placements := make([]placement, 0, len(targets))
+	pathSet := map[string]bool{}
 	for _, n := range targets {
 		from, _ := n.SchemaFile()
 		to := from
@@ -113,22 +116,15 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 			to = defaultSchemaPath(n)
 		}
 		placements = append(placements, placement{node: n, from: from, to: to})
-	}
-
-	files := newFileSet()
-	pathSet := map[string]bool{}
-	for _, p := range placements {
-		root := p.node.Project.Root
-		if p.from != "" {
-			pathSet[filepath.Join(root, p.from)] = true
+		if from != "" {
+			pathSet[filepath.Join(n.Project.Root, from)] = true
 		}
-		pathSet[filepath.Join(root, p.to)] = true
+		pathSet[filepath.Join(n.Project.Root, to)] = true
 	}
-	paths := make([]string, 0, len(pathSet))
-	for abs := range pathSet {
-		paths = append(paths, abs)
-	}
+	paths := slices.Sorted(maps.Keys(pathSet))
 
+	// files is written serially here and only read from the parallel passes below.
+	files := make(map[string]*yamlfile.File, len(paths))
 	loadErrs := make([]error, len(paths))
 	loaded := make([]*yamlfile.File, len(paths))
 	parallel(len(paths), func(i int) {
@@ -138,7 +134,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		if err != nil {
 			return nil, err
 		}
-		files.put(paths[i], loaded[i])
+		files[paths[i]] = loaded[i]
 	}
 
 	// Resolving is the expensive part and only reads, so it runs in parallel.
@@ -147,7 +143,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		p := placements[i]
 		var existing inherit.Existing
 		if p.from != "" {
-			if src := files.get(filepath.Join(p.node.Project.Root, p.from)); src != nil {
+			if src := files[filepath.Join(p.node.Project.Root, p.from)]; src != nil {
 				existing = readExisting(src, p.node)
 			}
 		}
@@ -162,7 +158,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		}
 		toAbs := filepath.Join(root, p.to)
 
-		dst := files.get(toAbs)
+		dst := files[toAbs]
 		if dst == nil {
 			continue
 		}
@@ -170,8 +166,8 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		rep.Warnings = append(rep.Warnings, doc.Warnings...)
 
 		if fromAbs != "" && fromAbs != toAbs {
-			if src := files.get(fromAbs); src != nil {
-				if entry := findEntry(src, p.node); entry != nil {
+			if src := files[fromAbs]; src != nil {
+				if entry := entryFor(src, p.node, false); entry != nil {
 					carryOver(dst, p.node, entry)
 					removeEntry(src, p.node)
 					rep.Changes = append(rep.Changes, Change{
@@ -192,40 +188,36 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	}
 
 	// Save, and drop files organising emptied out.
-	abs := files.paths()
 	type outcome struct {
 		rel     string
 		written bool
 		deleted bool
 		err     error
 	}
-	outcomes := make([]outcome, len(abs))
-	parallel(len(abs), func(i int) {
-		path := abs[i]
-		f := files.get(path)
+	outcomes := make([]outcome, len(paths))
+	parallel(len(paths), func(i int) {
+		path, f := paths[i], files[paths[i]]
 		o := outcome{rel: relTo(projects, path)}
+		defer func() { outcomes[i] = o }()
 
-		if f.IsEmpty() {
-			if f.Created {
-				outcomes[i] = o // never existed, nothing to write or delete
-				return
-			}
-			if resolved.DeleteEmpty {
-				if !opts.DryRun {
-					if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-						o.err = err
-						outcomes[i] = o
-						return
-					}
-				}
-				o.deleted = true
-				outcomes[i] = o
+		if !f.IsEmpty() {
+			o.written, o.err = f.Save(opts.DryRun)
+			return
+		}
+		if f.Created {
+			return // never existed, nothing to write or delete
+		}
+		if !resolved.DeleteEmpty {
+			o.written, o.err = f.Save(opts.DryRun)
+			return
+		}
+		if !opts.DryRun {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				o.err = err
 				return
 			}
 		}
-
-		o.written, o.err = f.Save(opts.DryRun)
-		outcomes[i] = o
+		o.deleted = true
 	})
 
 	for _, o := range outcomes {
@@ -247,15 +239,9 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 // parallel runs body for every index in [0, n), one goroutine per CPU.
 func parallel(n int, body func(i int)) {
-	if n == 0 {
-		return
-	}
-	workers := runtime.GOMAXPROCS(0)
-	if workers > n {
-		workers = n
-	}
+	workers := min(runtime.GOMAXPROCS(0), n)
 	if workers <= 1 {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			body(i)
 		}
 		return
@@ -264,14 +250,10 @@ func parallel(n int, body func(i int)) {
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for w := 0; w < workers; w++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
-			for {
-				i := int(next.Add(1)) - 1
-				if i >= n {
-					return
-				}
+			for i := int(next.Add(1)) - 1; i < n; i = int(next.Add(1)) - 1 {
 				body(i)
 			}
 		}()
@@ -283,10 +265,7 @@ func parallel(n int, body func(i int)) {
 // `config:` block, from the dbt version that produced the manifest, as dbt-osmosis'
 // fusion_compat detection does.
 func configBlockFor(n *dbt.Node) bool {
-	if n.Manifest == nil {
-		return false
-	}
-	return n.Manifest.WantsConfigBlock()
+	return n.Manifest != nil && n.Manifest.WantsConfigBlock()
 }
 
 // loadProjects reads every configured project in parallel.
@@ -296,16 +275,15 @@ func loadProjects(cfg *config.Config) ([]*dbt.Project, error) {
 	parallel(len(cfg.Projects), func(i int) {
 		ref := cfg.Projects[i]
 		// A manifest-only ref has no project directory to read dbt_project.yml from.
+		named := ref.Path
 		if ref.Manifest != "" {
+			named = ref.Manifest
 			out[i], errs[i] = dbt.LoadManifestOnly(ref.Name, absTo(cfg.Dir, ref.Manifest))
-			if errs[i] != nil {
-				errs[i] = fmt.Errorf("project %s: %w", ref.Manifest, errs[i])
-			}
-			return
+		} else {
+			out[i], errs[i] = dbt.LoadProject(absTo(cfg.Dir, ref.Path), ref.Target, !ref.Upstream)
 		}
-		out[i], errs[i] = dbt.LoadProject(absTo(cfg.Dir, ref.Path), ref.Target, !ref.Upstream)
 		if errs[i] != nil {
-			errs[i] = fmt.Errorf("project %s: %w", ref.Path, errs[i])
+			errs[i] = fmt.Errorf("project %s: %w", named, errs[i])
 		}
 	})
 	for _, err := range errs {
@@ -376,11 +354,8 @@ func matches(n *dbt.Node, selectors []string) bool {
 	for _, s := range selectors {
 		switch {
 		case strings.HasPrefix(s, "tag:"):
-			want := strings.TrimPrefix(s, "tag:")
-			for _, t := range n.Tags {
-				if t == want {
-					return true
-				}
+			if slices.Contains(n.Tags, strings.TrimPrefix(s, "tag:")) {
+				return true
 			}
 		case strings.HasPrefix(s, "path:"):
 			if strings.HasPrefix(n.OriginalFilePath, strings.TrimPrefix(s, "path:")) {
@@ -426,37 +401,6 @@ func relTo(projects []*dbt.Project, abs string) string {
 	return abs
 }
 
-// fileSet is a concurrency-safe map of loaded YAML files.
-type fileSet struct {
-	mu sync.Mutex
-	m  map[string]*yamlfile.File
-}
-
-func newFileSet() *fileSet { return &fileSet{m: map[string]*yamlfile.File{}} }
-
-func (s *fileSet) put(k string, f *yamlfile.File) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m[k] = f
-}
-
-func (s *fileSet) get(k string) *yamlfile.File {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.m[k]
-}
-
-func (s *fileSet) paths() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.m))
-	for k := range s.m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // section returns the YAML top-level key a node's entry lives under.
 func section(n *dbt.Node) string {
 	switch n.ResourceType {
@@ -469,18 +413,12 @@ func section(n *dbt.Node) string {
 	}
 }
 
-func findEntry(f *yamlfile.File, n *dbt.Node) *yaml.Node {
+// entryFor locates a node's YAML entry, creating it when create is set.
+func entryFor(f *yamlfile.File, n *dbt.Node, create bool) *yaml.Node {
 	if n.IsSource() {
-		return f.SourceTable(n.SourceName, n.Relation(), false)
+		return f.SourceTable(n.SourceName, n.Relation(), create)
 	}
-	return f.Entry(section(n), n.Name, false)
-}
-
-func ensureEntry(f *yamlfile.File, n *dbt.Node) *yaml.Node {
-	if n.IsSource() {
-		return f.SourceTable(n.SourceName, n.Relation(), true)
-	}
-	return f.Entry(section(n), n.Name, true)
+	return f.Entry(section(n), n.Name, create)
 }
 
 func removeEntry(f *yamlfile.File, n *dbt.Node) {
@@ -493,7 +431,7 @@ func removeEntry(f *yamlfile.File, n *dbt.Node) {
 // carryOver copies an entry verbatim, so a move keeps tests, comments and any
 // keys dbt-ditto does not manage.
 func carryOver(dst *yamlfile.File, n *dbt.Node, entry *yaml.Node) {
-	target := ensureEntry(dst, n)
+	target := entryFor(dst, n, true)
 	for i := 0; i+1 < len(entry.Content); i += 2 {
 		key := entry.Content[i].Value
 		if key == "name" {

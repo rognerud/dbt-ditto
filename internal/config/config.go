@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -520,6 +521,15 @@ var (
 // IsPlaceholder reports whether a description counts as undocumented, and so
 // may be overwritten by an inherited one.
 func (r Resolved) IsPlaceholder(desc string) bool { return r.Placeholders[desc] }
+
+// Fold normalises a column name for comparison, honouring case_insensitive, so
+// every lookup keys columns the way the configuration says they match.
+func (r Resolved) Fold(s string) string {
+	if r.CaseInsensitive {
+		return strings.ToLower(s)
+	}
+	return s
+}
 
 func boolOr(p *bool, def bool) bool {
 	if p == nil {

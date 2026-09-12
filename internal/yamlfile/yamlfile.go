@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -114,8 +115,7 @@ const (
 )
 
 func hashByte(h *uint64, b byte) {
-	*h ^= uint64(b)
-	*h *= fnvPrime
+	*h = (*h ^ uint64(b)) * fnvPrime
 }
 
 func hashString(h *uint64, s string) {
@@ -127,8 +127,7 @@ func hashString(h *uint64, s string) {
 
 func hashUint(h *uint64, v uint64) {
 	for i := 0; i < 8; i++ {
-		hashByte(h, byte(v))
-		v >>= 8
+		hashByte(h, byte(v>>(8*i)))
 	}
 }
 
@@ -215,7 +214,12 @@ func (f *File) Seq(key string, create bool) *yaml.Node {
 
 // Entry finds the mapping in the named sequence whose `name` matches, creating
 func (f *File) Entry(seqKey, name string, create bool) *yaml.Node {
-	seq := f.Seq(seqKey, create)
+	return namedEntry(f.Seq(seqKey, create), name, create)
+}
+
+// namedEntry finds the mapping in seq whose `name` matches, appending one when
+// create is set.
+func namedEntry(seq *yaml.Node, name string, create bool) *yaml.Node {
 	if seq == nil {
 		return nil
 	}
@@ -263,16 +267,7 @@ func (f *File) SourceTable(source, table string, create bool) *yaml.Node {
 		tables = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		MapSet(src, "tables", tables)
 	}
-	if e := findByName(tables, table); e != nil {
-		return e
-	}
-	if !create {
-		return nil
-	}
-	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	MapSet(entry, "name", Scalar(table))
-	tables.Content = append(tables.Content, entry)
-	return entry
+	return namedEntry(tables, table, create)
 }
 
 func findByName(seq *yaml.Node, name string) *yaml.Node {
@@ -358,20 +353,13 @@ func Encode(v any) (*yaml.Node, error) {
 		return Scalar(t), nil
 	case bool:
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(t)}, nil
-	case int:
-		return intNode(int64(t)), nil
-	case int32:
-		return intNode(int64(t)), nil
-	case int64:
-		return intNode(t), nil
-	case uint:
-		return intNode(int64(t)), nil
-	case uint64:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.FormatUint(t, 10)}, nil
-	case float32:
-		return floatNode(float64(t)), nil
-	case float64:
-		return floatNode(t), nil
+	case int, int8, int16, int32, int64:
+		return intNode(reflect.ValueOf(v).Int()), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int",
+			Value: strconv.FormatUint(reflect.ValueOf(v).Uint(), 10)}, nil
+	case float32, float64:
+		return floatNode(reflect.ValueOf(v).Float()), nil
 	}
 
 	var n yaml.Node

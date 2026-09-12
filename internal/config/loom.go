@@ -102,17 +102,13 @@ func (c *Config) attachLoomUpstreams() {
 
 // loomConfigPath returns the dbt-loom config governing a project root, honouring
 func loomConfigPath(root string) (string, bool) {
-	if env := os.Getenv(loomEnv); env != "" {
-		p := env
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(root, p)
-		}
-		if _, err := os.Stat(p); err == nil {
-			return p, true
-		}
-		return "", false
+	p := os.Getenv(loomEnv)
+	if p == "" {
+		p = loomFilename
 	}
-	p := filepath.Join(root, loomFilename)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
 	if _, err := os.Stat(p); err == nil {
 		return p, true
 	}

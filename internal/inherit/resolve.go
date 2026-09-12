@@ -120,7 +120,6 @@ type ExistingColumn struct {
 
 // Existing is the current YAML state of a node, read from the schema file.
 type Existing struct {
-	Present     bool
 	Description string
 	Meta        []MetaEntry
 	Columns     []ExistingColumn
@@ -162,7 +161,7 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 
 	existingByKey := make(map[string]*ExistingColumn, len(existing.Columns))
 	for i := range existing.Columns {
-		existingByKey[r.fold(existing.Columns[i].Name)] = &existing.Columns[i]
+		existingByKey[r.Cfg.Fold(existing.Columns[i].Name)] = &existing.Columns[i]
 	}
 
 	// haveTruth says the list is warehouse truth, which alone licenses deletion.
@@ -176,23 +175,21 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 
 	truthByKey := make(map[string]bool, len(truth))
 	for _, t := range truth {
-		truthByKey[r.fold(t.name)] = true
+		truthByKey[r.Cfg.Fold(t.name)] = true
 	}
 
 	generations := r.Graph.Generations(n.UniqueID)
 
 	for _, t := range r.orderColumns(truth, existing.Columns, haveTruth) {
-		key := r.fold(t.name)
+		key := r.Cfg.Fold(t.name)
 		ex := existingByKey[key]
 		if ex == nil && !r.Cfg.AddMissing {
 			continue
 		}
 
-		cd := ColumnDoc{Name: t.name, Existing: ex != nil}
+		cd := ColumnDoc{Name: r.applyCase(t.name), Existing: ex != nil}
 		if ex != nil {
 			cd.Name = ex.Name // never churn an already-written spelling
-		} else {
-			cd.Name = r.applyCase(t.name)
 		}
 
 		k := r.seedKnowledge(n, t.name, ex)
@@ -299,7 +296,7 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 
 	if r.Cfg.RemoveStale && haveTruth {
 		for _, c := range existing.Columns {
-			if !truthByKey[r.fold(c.Name)] {
+			if !truthByKey[r.Cfg.Fold(c.Name)] {
 				doc.Drop = append(doc.Drop, c.Name)
 			}
 		}
@@ -309,10 +306,7 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 
 // backfills reports whether a node may take documentation from downstream.
 func (r *Resolver) backfills(n *dbt.Node) bool {
-	if !r.Cfg.Backfill {
-		return false
-	}
-	return !r.Cfg.BackfillSourcesOnly || n.IsSource()
+	return r.Cfg.Backfill && (!r.Cfg.BackfillSourcesOnly || n.IsSource())
 }
 
 // backfill finds a description among descendants, nearest generation first, and returns
@@ -398,13 +392,14 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			}
 			if r.Cfg.InheritMeta {
 				labelKey := r.labelKey()
-				for _, mk := range c.EffectiveMeta().Keys() {
+				em := c.EffectiveMeta()
+				for _, mk := range em.Keys() {
 					// An ancestor's annotations describe its own column, not this one.
 					if r.Cfg.SkipMetaKeys[mk] || mk == r.Cfg.ProgenitorKey ||
 						mk == r.Cfg.AmbiguityKey || mk == DefinitiveKey {
 						continue
 					}
-					v, _ := c.EffectiveMeta().Get(mk)
+					v, _ := em.Get(mk)
 					if labelKey != "" && mk == labelKey {
 						// Labels travel under their own rules: what may be done, not meaning.
 						if !r.carryLabels(k, a, generations[i][j+1:], name, keys, rank, v) {
@@ -540,7 +535,7 @@ func (r *Resolver) trueColumns(n *dbt.Node) ([]columnTruth, bool) {
 			// BigQuery reports both `profile` and `profile.first_name`; DuckDB only `profile`.
 			known := make(map[string]bool, len(cols))
 			for _, c := range cols {
-				known[r.fold(c.Name)] = true
+				known[r.Cfg.Fold(c.Name)] = true
 			}
 
 			for _, c := range cols {
@@ -551,10 +546,10 @@ func (r *Resolver) trueColumns(n *dbt.Node) ([]columnTruth, bool) {
 					continue
 				}
 				for _, f := range dbt.StructFields(c.Name, c.Type) {
-					if known[r.fold(f.Path)] {
+					if known[r.Cfg.Fold(f.Path)] {
 						continue
 					}
-					known[r.fold(f.Path)] = true
+					known[r.Cfg.Fold(f.Path)] = true
 					out = append(out, columnTruth{name: f.Path, dataType: f.Type, index: c.Index})
 				}
 			}
@@ -587,19 +582,19 @@ func (r *Resolver) orderColumns(truth []columnTruth, existing []ExistingColumn, 
 	// YAML order: keep what the file already lists, then append the rest.
 	byKey := make(map[string]columnTruth, len(truth))
 	for _, t := range truth {
-		byKey[r.fold(t.name)] = t
+		byKey[r.Cfg.Fold(t.name)] = t
 	}
 	out := make([]columnTruth, 0, len(truth))
 	seen := make(map[string]bool, len(truth))
 	for _, e := range existing {
-		key := r.fold(e.Name)
+		key := r.Cfg.Fold(e.Name)
 		if t, ok := byKey[key]; ok && !seen[key] {
 			seen[key] = true
 			out = append(out, t)
 		}
 	}
 	for _, t := range truth {
-		if key := r.fold(t.name); !seen[key] {
+		if key := r.Cfg.Fold(t.name); !seen[key] {
 			seen[key] = true
 			out = append(out, t)
 		}
@@ -621,10 +616,7 @@ func entries(m *dbt.OrderedMap) []MetaEntry {
 
 // definitiveFor returns the settled description for a column name, if declared.
 func (r *Resolver) definitiveFor(name string) (Definitive, bool) {
-	if len(r.Definitives) == 0 {
-		return Definitive{}, false
-	}
-	d, ok := r.Definitives[r.fold(name)]
+	d, ok := r.Definitives[r.Cfg.Fold(name)]
 	return d, ok
 }
 
@@ -634,17 +626,6 @@ func (r *Resolver) declaresDefinitive(n *dbt.Node, name string) bool {
 	c := n.Column(name, r.Cfg.CaseInsensitive)
 	return c != nil && isDefinitive(c)
 }
-
-func (r *Resolver) fold(s string) string {
-	if r.Cfg.CaseInsensitive {
-		return strings.ToLower(s)
-	}
-	return s
-}
-
-// Fold exposes the resolver's column-name folding, so definitives are keyed
-// exactly the way lookups read them.
-func (r *Resolver) Fold(s string) string { return r.fold(s) }
 
 func (r *Resolver) applyCase(s string) string {
 	switch r.Cfg.ColumnCase {

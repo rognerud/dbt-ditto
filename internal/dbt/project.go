@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,11 +40,9 @@ type pathRule struct {
 // projectYAML is the slice of dbt_project.yml we care about.
 type projectYAML struct {
 	Name        string         `yaml:"name"`
-	ModelPaths  []string       `yaml:"model-paths"`
 	Models      map[string]any `yaml:"models"`
 	Seeds       map[string]any `yaml:"seeds"`
 	Snapshots   map[string]any `yaml:"snapshots"`
-	TargetPath  string         `yaml:"target-path"`
 	ProfileName string         `yaml:"profile"`
 }
 
@@ -105,13 +104,17 @@ func LoadProject(root, targetDir string, writable bool) (*Project, error) {
 		collectPathRules(section, nil, &p.pathRules)
 	}
 
-	for _, n := range man.Nodes {
-		n.Project = p
-	}
-	for _, n := range man.Sources {
-		n.Project = p
-	}
+	p.claim()
 	return p, nil
+}
+
+// claim points every node of the project's manifest back at it.
+func (p *Project) claim() {
+	for _, m := range []map[string]*Node{p.Manifest.Nodes, p.Manifest.Sources} {
+		for _, n := range m {
+			n.Project = p
+		}
+	}
 }
 
 // LoadManifestOnly reads an upstream that arrives as a bare manifest.json, as a
@@ -135,22 +138,14 @@ func LoadManifestOnly(name, manifestPath string) (*Project, error) {
 	if p.Name == "" {
 		p.Name = man.Metadata.ProjectName
 	}
-	for _, n := range man.Nodes {
-		n.Project = p
-	}
-	for _, n := range man.Sources {
-		n.Project = p
-	}
+	p.claim()
 	return p, nil
 }
 
 // artifactPath prefers the plain file and falls back to a gzipped one.
 func artifactPath(targetDir, name string) string {
 	plain := filepath.Join(targetDir, name)
-	if _, err := os.Stat(plain); err == nil {
-		return plain
-	}
-	if gz := plain + ".gz"; fileExists(gz) {
+	if gz := plain + ".gz"; !fileExists(plain) && fileExists(gz) {
 		return gz
 	}
 	return plain
@@ -207,17 +202,10 @@ func (p *Project) PathTemplate(n *Node) (string, bool) {
 	best := ""
 	bestLen := -1
 	for _, r := range p.pathRules {
-		if len(r.prefix) > len(fqn) {
+		if len(r.prefix) > len(fqn) || len(r.prefix) <= bestLen {
 			continue
 		}
-		match := true
-		for i, seg := range r.prefix {
-			if fqn[i] != seg {
-				match = false
-				break
-			}
-		}
-		if match && len(r.prefix) > bestLen {
+		if slices.Equal(r.prefix, fqn[:len(r.prefix)]) {
 			best, bestLen = r.template, len(r.prefix)
 		}
 	}

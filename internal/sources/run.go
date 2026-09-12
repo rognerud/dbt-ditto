@@ -56,10 +56,8 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 	}
 
 	type result struct {
-		provider int
-		resp     *Response
-		err      error
-		claimed  int
+		resp *Response
+		err  error
 	}
 	results := make([]result, len(providers))
 
@@ -72,7 +70,6 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 				claimed = append(claimed, s)
 			}
 		}
-		results[i] = result{provider: i, claimed: len(claimed)}
 		if len(claimed) == 0 {
 			continue
 		}
@@ -89,8 +86,8 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 
 	// Merged in configured order, so "first provider to claim a source wins" is a
 	// rule someone can read off their own config.
-	for _, res := range results {
-		p := providers[res.provider]
+	for i, res := range results {
+		p := providers[i]
 		if res.err != nil {
 			set.Warnings = append(set.Warnings,
 				fmt.Sprintf("source provider %q: %v", p.Command, res.err))
@@ -131,7 +128,8 @@ func run(ctx context.Context, p Provider, projects []RequestProject, want []Requ
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, shell(), shellFlag(), p.Command)
+	sh, flag := shell()
+	cmd := exec.CommandContext(ctx, sh, flag, p.Command)
 	cmd.Dir = p.Dir
 	cmd.Stdin = bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer
@@ -169,16 +167,11 @@ func lastLine(s string) string {
 	return s
 }
 
-func shell() string {
+// shell is the interpreter a provider command is handed to, and its "run this
+// string" flag.
+func shell() (string, string) {
 	if runtime.GOOS == "windows" {
-		return "cmd"
+		return "cmd", "/c"
 	}
-	return "sh"
-}
-
-func shellFlag() string {
-	if runtime.GOOS == "windows" {
-		return "/c"
-	}
-	return "-c"
+	return "sh", "-c"
 }

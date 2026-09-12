@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -81,11 +83,8 @@ func (m *OrderedMap) Delete(key string) {
 		return
 	}
 	delete(m.values, key)
-	for i, k := range m.keys {
-		if k == key {
-			m.keys = append(m.keys[:i], m.keys[i+1:]...)
-			break
-		}
+	if i := slices.Index(m.keys, key); i >= 0 {
+		m.keys = slices.Delete(m.keys, i, i+1)
 	}
 }
 
@@ -95,10 +94,8 @@ func (m *OrderedMap) Clone() *OrderedMap {
 	if m == nil {
 		return out
 	}
-	out.keys = append(out.keys, m.keys...)
-	for k, v := range m.values {
-		out.values[k] = v
-	}
+	out.keys = slices.Clone(m.keys)
+	maps.Copy(out.values, m.values)
 	return out
 }
 
@@ -112,12 +109,8 @@ func (m *OrderedMap) UnmarshalJSON(data []byte) error {
 
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	tok, err := dec.Token()
-	if err != nil {
+	if err := expectObject(dec, "a JSON object"); err != nil {
 		return err
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected a JSON object, got %v", tok)
 	}
 	for dec.More() {
 		keyTok, err := dec.Token()
@@ -134,7 +127,7 @@ func (m *OrderedMap) UnmarshalJSON(data []byte) error {
 		}
 		m.Set(key, normaliseNumbers(val))
 	}
-	_, err = dec.Token() // closing brace
+	_, err := dec.Token() // closing brace
 	return err
 }
 
@@ -199,7 +192,7 @@ func UnionTags(have, add []string) []string {
 	}
 	seen := make(map[string]bool, len(have)+len(add))
 	out := make([]string, 0, len(have)+len(add))
-	for _, t := range append(append([]string(nil), have...), add...) {
+	for _, t := range slices.Concat(have, add) {
 		if !seen[t] {
 			seen[t] = true
 			out = append(out, t)

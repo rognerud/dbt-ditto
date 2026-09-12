@@ -1,6 +1,7 @@
 package inherit
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
@@ -59,10 +60,7 @@ func (i *columnIndex) lookup(keys [matchNone][]string) (*dbt.Column, matchRank) 
 		}
 		for _, key := range keys[down] {
 			if c, ok := m[key]; ok {
-				if down > up {
-					return c, down
-				}
-				return c, up
+				return c, max(down, up)
 			}
 		}
 	}
@@ -84,13 +82,6 @@ func (m *matcher) enabled() bool {
 	return m.cfg.DerivedStructs || m.cfg.DerivedAggregates
 }
 
-func (m *matcher) fold(s string) string {
-	if m.cfg.CaseInsensitive {
-		return strings.ToLower(s)
-	}
-	return s
-}
-
 // leaf returns the last segment of a dotted column path.
 func leaf(name string) string {
 	if i := strings.LastIndexByte(name, '.'); i >= 0 {
@@ -108,13 +99,8 @@ func (m *matcher) stripAggregate(name string) []string {
 
 	var out []string
 	add := func(s string) {
-		if s == "" || s == name {
+		if s == "" || s == name || slices.Contains(out, s) {
 			return
-		}
-		for _, existing := range out {
-			if existing == s {
-				return
-			}
 		}
 		out = append(out, s)
 	}
@@ -164,7 +150,7 @@ func trimWord(name, word string, prefix bool) (string, bool) {
 // eachKey calls yield with every folded lookup key a column name can be found under,
 // and the rank at which it counts as a match.
 func (m *matcher) eachKey(name string, yield func(matchRank, string)) {
-	yield(matchExact, m.fold(name))
+	yield(matchExact, m.cfg.Fold(name))
 	if !m.enabled() {
 		return
 	}
@@ -172,14 +158,14 @@ func (m *matcher) eachKey(name string, yield func(matchRank, string)) {
 	if m.cfg.DerivedStructs {
 		if s := leaf(name); s != name {
 			l = s
-			yield(matchLeaf, m.fold(l))
+			yield(matchLeaf, m.cfg.Fold(l))
 		}
 	}
 	for _, stripped := range m.stripAggregate(name) {
-		yield(matchAggregate, m.fold(stripped))
+		yield(matchAggregate, m.cfg.Fold(stripped))
 	}
 	for _, stripped := range m.stripAggregate(l) {
-		yield(matchLeafAggregate, m.fold(stripped))
+		yield(matchLeafAggregate, m.cfg.Fold(stripped))
 	}
 }
 

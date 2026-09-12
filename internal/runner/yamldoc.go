@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/rognerud/dbt-ditto/internal/config"
@@ -20,12 +21,11 @@ type writeOpts struct {
 
 // readExisting reads the node's current documentation out of a schema file.
 func readExisting(f *yamlfile.File, n *dbt.Node) inherit.Existing {
-	entry := findEntry(f, n)
+	entry := entryFor(f, n, false)
 	if entry == nil {
 		return inherit.Existing{}
 	}
 	ex := inherit.Existing{
-		Present:     true,
 		Description: yamlfile.StringOf(yamlfile.MapGet(entry, "description")),
 		Meta:        readMeta(entry),
 	}
@@ -76,28 +76,19 @@ func readMeta(entry *yaml.Node) []inherit.MetaEntry {
 func readTags(entry *yaml.Node) []string {
 	tags := yamlfile.DecodeStrings(yamlfile.MapGet(entry, "tags"))
 	for _, t := range yamlfile.DecodeStrings(yamlfile.MapGet(yamlfile.MapGet(entry, "config"), "tags")) {
-		if !contains(tags, t) {
+		if !slices.Contains(tags, t) {
 			tags = append(tags, t)
 		}
 	}
 	return tags
 }
 
-func contains(hay []string, needle string) bool {
-	for _, h := range hay {
-		if h == needle {
-			return true
-		}
-	}
-	return false
-}
-
 // writeDoc applies a resolved NodeDoc to the destination file and returns a
 func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpts) []string {
-	if !doc.Changed() && findEntry(f, n) == nil && len(doc.Columns) == 0 {
+	if !doc.Changed() && entryFor(f, n, false) == nil && len(doc.Columns) == 0 {
 		return nil
 	}
-	entry := ensureEntry(f, n)
+	entry := entryFor(f, n, true)
 	var changes []string
 
 	if doc.SetDescription {
@@ -123,20 +114,20 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 				continue
 			}
 			existingOrder = append(existingOrder, c)
-			existingCols[fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")), opts.cfg)] = c
+			existingCols[opts.cfg.Fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")))] = c
 		}
 	}
 
 	dropped := map[string]bool{}
 	for _, d := range doc.Drop {
-		dropped[fold(d, opts.cfg)] = true
+		dropped[opts.cfg.Fold(d)] = true
 	}
 
 	newSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	kept := map[string]bool{}
 
 	for _, cd := range doc.Columns {
-		key := fold(cd.Name, opts.cfg)
+		key := opts.cfg.Fold(cd.Name)
 		node := existingCols[key]
 		if node == nil {
 			node = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -180,7 +171,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 	// Anything the resolver neither kept nor dropped stays put, so disabling
 	// remove_stale really does leave columns alone.
 	for _, c := range existingOrder {
-		key := fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")), opts.cfg)
+		key := opts.cfg.Fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")))
 		if kept[key] {
 			continue
 		}
@@ -223,24 +214,14 @@ func dropItemComments(old, updated []*yaml.Node) {
 // setMeta writes the complete meta mapping, top level or inside `config:`, and
 // removes the other so a column never carries both.
 func setMeta(entry *yaml.Node, meta []inherit.MetaEntry, configBlock bool) {
-	if len(meta) == 0 {
-		yamlfile.MapDelete(entry, "meta")
-		deleteFromConfig(entry, "meta")
+	holder := holderFor(entry, "meta", configBlock, len(meta) > 0)
+	if holder == nil {
 		return
 	}
 
-	holder := entry
-	if configBlock {
-		yamlfile.MapDelete(entry, "meta")
-		holder = ensureConfig(entry)
-	} else {
-		deleteFromConfig(entry, "meta")
-	}
-
 	m := yamlfile.MapGet(holder, "meta")
-	if m == nil || m.Kind != yaml.MappingNode {
-		m = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		yamlfile.MapSet(holder, "meta", m)
+	if m != nil && m.Kind != yaml.MappingNode {
+		m = nil // whatever was there is not a mapping, so nothing to reuse
 	}
 	// Rebuild in the resolved order, reusing existing value nodes so comments and
 	// quoting style survive.
@@ -255,24 +236,15 @@ func setMeta(entry *yaml.Node, meta []inherit.MetaEntry, configBlock bool) {
 		}
 		yamlfile.MapSet(rebuilt, e.Key, v)
 	}
-	rebuilt.HeadComment, rebuilt.LineComment, rebuilt.FootComment = m.HeadComment, m.LineComment, m.FootComment
+	// MapSet carries the comments of whatever `meta:` held before onto the rebuild.
 	yamlfile.MapSet(holder, "meta", rebuilt)
 }
 
 // setTags writes the complete tag list, top level or inside `config:`.
 func setTags(entry *yaml.Node, tags []string, configBlock bool) {
-	if len(tags) == 0 {
-		yamlfile.MapDelete(entry, "tags")
-		deleteFromConfig(entry, "tags")
+	holder := holderFor(entry, "tags", configBlock, len(tags) > 0)
+	if holder == nil {
 		return
-	}
-
-	holder := entry
-	if configBlock {
-		yamlfile.MapDelete(entry, "tags")
-		holder = ensureConfig(entry)
-	} else {
-		deleteFromConfig(entry, "tags")
 	}
 
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
@@ -301,6 +273,24 @@ func moveKeyLast(m *yaml.Node, key string) {
 	}
 }
 
+// holderFor clears key from whichever of the entry and its `config:` block does
+// not own it and returns the one that does, or nil when there is nothing to write.
+func holderFor(entry *yaml.Node, key string, configBlock, want bool) *yaml.Node {
+	if !want || configBlock {
+		yamlfile.MapDelete(entry, key)
+	}
+	if !want || !configBlock {
+		deleteFromConfig(entry, key)
+	}
+	switch {
+	case !want:
+		return nil
+	case configBlock:
+		return ensureConfig(entry)
+	}
+	return entry
+}
+
 func ensureConfig(entry *yaml.Node) *yaml.Node {
 	cfg := yamlfile.MapGet(entry, "config")
 	if cfg == nil || cfg.Kind != yaml.MappingNode {
@@ -320,13 +310,6 @@ func deleteFromConfig(entry *yaml.Node, key string) {
 	if len(cfg.Content) == 0 {
 		yamlfile.MapDelete(entry, "config")
 	}
-}
-
-func fold(s string, cfg config.Resolved) string {
-	if cfg.CaseInsensitive {
-		return strings.ToLower(s)
-	}
-	return s
 }
 
 func metaKeys(meta []inherit.MetaEntry) string {

@@ -130,24 +130,17 @@ func run(args []string) error {
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
-	var (
-		cfgPath    string
-		dryRun     bool
-		check      bool
-		selectSpec string
-		noOrganize bool
-		verbose    bool
-		refresh    bool
-		target     string
-	)
-	fs.BoolVar(&refresh, "refresh-sources", false, "run the source providers and rewrite the cache")
-	fs.StringVar(&target, "target", "", "profiles.yml target for source providers")
+	refresh := fs.Bool("refresh-sources", false, "run the source providers and rewrite the cache")
+	target := fs.String("target", "", "profiles.yml target for source providers")
+	dryRun := fs.Bool("dry-run", false, "report changes without writing")
+	check := fs.Bool("check", false, "exit 1 if any file would change")
+	selectSpec := fs.String("select", "", "node selector")
+	noOrganize := fs.Bool("no-organize", false, "never move a model between files")
+	// The short spellings are aliases, so they share a variable.
+	var cfgPath string
+	var verbose bool
 	fs.StringVar(&cfgPath, "config", "", "path to dbt_ditto.yml")
 	fs.StringVar(&cfgPath, "c", "", "path to dbt_ditto.yml")
-	fs.BoolVar(&dryRun, "dry-run", false, "report changes without writing")
-	fs.BoolVar(&check, "check", false, "exit 1 if any file would change")
-	fs.StringVar(&selectSpec, "select", "", "node selector")
-	fs.BoolVar(&noOrganize, "no-organize", false, "never move a model between files")
 	fs.BoolVar(&verbose, "verbose", false, "list every change")
 	fs.BoolVar(&verbose, "v", false, "list every change")
 
@@ -190,20 +183,20 @@ func run(args []string) error {
 	// Refreshing reaches the network and rewrites the cache, which is not something
 	// --check should do: the point of the cache is that CI reads it rather than
 	// dialling out. Asking for both is a mistake worth naming.
-	if refresh && check {
+	if *refresh && *check {
 		return fmt.Errorf("--refresh-sources and --check are contradictory: --check must not reach the warehouse; refresh first, then check")
 	}
 
 	opts := runner.Options{
-		DryRun:         dryRun || check,
-		Check:          check,
-		Organize:       !noOrganize,
+		DryRun:         *dryRun || *check,
+		Check:          *check,
+		Organize:       !*noOrganize,
 		Verbose:        verbose,
-		RefreshSources: refresh,
-		Target:         target,
+		RefreshSources: *refresh,
+		Target:         *target,
 	}
-	if selectSpec != "" {
-		opts.Select = strings.Split(selectSpec, ",")
+	if *selectSpec != "" {
+		opts.Select = strings.Split(*selectSpec, ",")
 	}
 
 	rep, err := runner.Run(cfg, opts)
@@ -220,20 +213,17 @@ func run(args []string) error {
 			fmt.Printf("  %s\n    %s: %s\n", c.Node, c.File, c.Detail)
 		}
 	}
-	for _, f := range rep.FilesWritten {
-		verb := "would write"
-		if !opts.DryRun {
-			verb = "wrote"
+	list := func(files []string, done, would string) {
+		verb := done
+		if opts.DryRun {
+			verb = would
 		}
-		fmt.Printf("%s %s\n", verb, f)
-	}
-	for _, f := range rep.FilesDeleted {
-		verb := "would delete"
-		if !opts.DryRun {
-			verb = "deleted"
+		for _, f := range files {
+			fmt.Printf("%s %s\n", verb, f)
 		}
-		fmt.Printf("%s %s\n", verb, f)
 	}
+	list(rep.FilesWritten, "wrote", "would write")
+	list(rep.FilesDeleted, "deleted", "would delete")
 
 	// Warnings go to stderr: they are about the project, not about this run.
 	for _, w := range rep.Warnings {
@@ -252,7 +242,7 @@ func run(args []string) error {
 		fmt.Printf("%d warnings\n", len(rep.Warnings))
 	}
 
-	if check && (len(rep.FilesWritten) > 0 || len(rep.FilesDeleted) > 0) {
+	if *check && (len(rep.FilesWritten) > 0 || len(rep.FilesDeleted) > 0) {
 		return fmt.Errorf("documentation is out of date")
 	}
 	return nil

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,10 +118,8 @@ type Node struct {
 	Alias            string             `json:"alias"`
 	Identifier       string             `json:"identifier"`
 	SourceName       string             `json:"source_name"`
-	RelationName     string             `json:"relation_name"`
 	OriginalFilePath string             `json:"original_file_path"`
 	PatchPath        string             `json:"patch_path"`
-	Path             string             `json:"path"`
 	FQN              []string           `json:"fqn"`
 	Description      string             `json:"description"`
 	Columns          map[string]*Column `json:"columns"`
@@ -219,16 +218,6 @@ func (n *Node) Relation() string {
 	return n.Name
 }
 
-// ConfigMeta returns the node's `config.meta`, read directly so `+meta:` set in
-// dbt_project.yml is visible.
-func (n *Node) ConfigMeta() map[string]any {
-	if n.Config == nil {
-		return nil
-	}
-	m, _ := n.Config["meta"].(map[string]any)
-	return m
-}
-
 // ConfigString reads a string-valued key out of the node config, where dbt puts
 // unrecognised `+key:` entries — how the per-model YAML path rule is threaded.
 func (n *Node) ConfigString(key string) (string, bool) {
@@ -245,10 +234,8 @@ func (n *Node) ConfigString(key string) (string, bool) {
 
 // Metadata is the manifest header.
 type Metadata struct {
-	ProjectName   string `json:"project_name"`
-	AdapterType   string `json:"adapter_type"`
-	DbtVersion    string `json:"dbt_version"`
-	DbtSchemaVers string `json:"dbt_schema_version"`
+	ProjectName string `json:"project_name"`
+	DbtVersion  string `json:"dbt_version"`
 }
 
 // Manifest is a decoded manifest.json.
@@ -256,8 +243,6 @@ type Manifest struct {
 	Metadata Metadata         `json:"metadata"`
 	Nodes    map[string]*Node `json:"nodes"`
 	Sources  map[string]*Node `json:"sources"`
-
-	Path string `json:"-"`
 }
 
 // LoadManifest decodes manifest.json (optionally gzipped) from path.
@@ -268,7 +253,7 @@ func LoadManifest(path string) (*Manifest, error) {
 	}
 	defer closer()
 
-	m := &Manifest{Path: path, Nodes: map[string]*Node{}, Sources: map[string]*Node{}}
+	m := &Manifest{Nodes: map[string]*Node{}, Sources: map[string]*Node{}}
 	dec := json.NewDecoder(bufio.NewReaderSize(r, 1<<20))
 	if err := m.decode(dec); err != nil {
 		return nil, fmt.Errorf("decode manifest %s: %w", path, err)
@@ -278,12 +263,8 @@ func LoadManifest(path string) (*Manifest, error) {
 
 // decode reads a manifest as a stream.
 func (m *Manifest) decode(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
+	if err := expectObject(dec, "a JSON object at the top level"); err != nil {
 		return err
-	}
-	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return fmt.Errorf("expected a JSON object at the top level, got %v", tok)
 	}
 
 	order := 0
@@ -312,18 +293,26 @@ func (m *Manifest) decode(dec *json.Decoder) error {
 			}
 		}
 	}
-	_, err = dec.Token() // closing brace
+	_, err := dec.Token() // closing brace
 	return err
 }
 
-// decodeNodeMap reads one `{unique_id: node}` object.
-func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order *int, forceType string) error {
+// expectObject consumes the `{` opening a JSON object, naming what was wanted.
+func expectObject(dec *json.Decoder, what string) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return err
 	}
 	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return fmt.Errorf("expected an object of nodes, got %v", tok)
+		return fmt.Errorf("expected %s, got %v", what, tok)
+	}
+	return nil
+}
+
+// decodeNodeMap reads one `{unique_id: node}` object.
+func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order *int, forceType string) error {
+	if err := expectObject(dec, "an object of nodes"); err != nil {
+		return err
 	}
 	for dec.More() {
 		keyTok, err := dec.Token()
@@ -344,7 +333,7 @@ func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order 
 		}
 		into[id] = n
 	}
-	_, err = dec.Token() // closing brace
+	_, err := dec.Token() // closing brace
 	return err
 }
 
@@ -425,15 +414,7 @@ var configBlockMinVersion = [3]int{1, 9, 6}
 // from the manifest's dbt version.
 func (m *Manifest) WantsConfigBlock() bool {
 	v, ok := parseVersion(m.Metadata.DbtVersion)
-	if !ok {
-		return false
-	}
-	for i := 0; i < 3; i++ {
-		if v[i] != configBlockMinVersion[i] {
-			return v[i] > configBlockMinVersion[i]
-		}
-	}
-	return true
+	return ok && slices.Compare(v[:], configBlockMinVersion[:]) >= 0
 }
 
 // parseVersion reads a leading `major.minor.patch` out of a version string,

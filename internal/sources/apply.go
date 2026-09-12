@@ -2,9 +2,11 @@ package sources
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -158,53 +160,51 @@ func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	c.Invalidate()
 }
 
-// applyNodeLabels routes a relation's own labels onto the source entry.
-func applyNodeLabels(n *dbt.Node, labels map[string]string, l config.ResolvedLabels) {
+// routeLabels sends label pairs wherever the configuration says they go: flattened
+// into meta or nested under the meta key, and rendered as tags. Both writers are
+// absent-only, so hand-written metadata is never overwritten.
+func routeLabels(labels map[string]string, l config.ResolvedLabels,
+	setIfAbsent func(string, any), addTags func([]string)) {
+
 	if len(labels) == 0 {
 		return
 	}
-	if l.ToMeta() {
+	switch {
+	case !l.ToMeta():
+	case l.MetaKey == "":
+		for _, k := range slices.Sorted(maps.Keys(labels)) {
+			setIfAbsent(k, labels[k])
+		}
+	default:
+		setIfAbsent(l.MetaKey, labelMap(labels))
+	}
+	if l.ToTags() {
+		addTags(RenderTags(labels, l))
+	}
+}
+
+// applyNodeLabels routes a relation's own labels onto the source entry.
+func applyNodeLabels(n *dbt.Node, labels map[string]string, l config.ResolvedLabels) {
+	routeLabels(labels, l, func(k string, v any) {
 		if n.Meta == nil {
 			n.Meta = map[string]any{}
 		}
-		if l.MetaKey == "" {
-			for _, k := range sortedKeys(labels) {
-				if _, taken := n.Meta[k]; !taken {
-					n.Meta[k] = labels[k]
-				}
-			}
-		} else if _, taken := n.Meta[l.MetaKey]; !taken {
-			n.Meta[l.MetaKey] = labelMap(labels)
+		if _, taken := n.Meta[k]; !taken {
+			n.Meta[k] = v
 		}
-	}
-	if l.ToTags() {
-		n.Tags = dbt.UnionTags(n.Tags, RenderTags(labels, l))
-	}
+	}, func(t []string) { n.Tags = dbt.UnionTags(n.Tags, t) })
 }
 
 // applyColumnLabels routes a column's labels into its meta and tags.
 func applyColumnLabels(col *dbt.Column, labels map[string]string, l config.ResolvedLabels) {
-	if len(labels) == 0 {
-		return
-	}
-	if l.ToMeta() {
-		if l.MetaKey == "" {
-			for _, k := range sortedKeys(labels) {
-				setMetaIfAbsent(col, k, labels[k])
-			}
-		} else {
-			setMetaIfAbsent(col, l.MetaKey, labelMap(labels))
-		}
-	}
-	if l.ToTags() {
-		col.Tags = dbt.UnionTags(col.Tags, RenderTags(labels, l))
-	}
+	routeLabels(labels, l, func(k string, v any) { setMetaIfAbsent(col, k, v) },
+		func(t []string) { col.Tags = dbt.UnionTags(col.Tags, t) })
 }
 
 // RenderTags turns label pairs into dbt tags, in key order so a run is stable.
 func RenderTags(labels map[string]string, l config.ResolvedLabels) []string {
 	out := make([]string, 0, len(labels))
-	for _, k := range sortedKeys(labels) {
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
 		v := labels[k]
 		if v == "" {
 			// BigQuery permits a label with no value, and `owner:` is not a useful tag.
@@ -220,7 +220,7 @@ func RenderTags(labels map[string]string, l config.ResolvedLabels) []string {
 // LabelMap renders label pairs as the ordered map written under the meta key.
 func labelMap(labels map[string]string) *dbt.OrderedMap {
 	m := dbt.NewOrderedMap()
-	for _, k := range sortedKeys(labels) {
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
 		m.Set(k, labels[k])
 	}
 	return m
@@ -261,15 +261,6 @@ func anyMatch(patterns []string, key string) bool {
 		}
 	}
 	return false
-}
-
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func setMeta(col *dbt.Column, key string, value any) {

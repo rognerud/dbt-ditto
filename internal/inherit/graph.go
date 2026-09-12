@@ -139,51 +139,47 @@ func (g *Graph) Generations(id string) [][]*dbt.Node {
 	if cached, ok := g.gens[id]; ok {
 		return cached
 	}
-
-	byDepth := map[int][]string{}
-	visited := map[string]bool{id: true}
-	g.walk(id, 1, byDepth, visited)
-
-	maxDepth := 0
-	for d := range byDepth {
-		if d > maxDepth {
-			maxDepth = d
-		}
-	}
-	out := make([][]*dbt.Node, 0, maxDepth)
-	for d := 1; d <= maxDepth; d++ {
-		ids := byDepth[d]
-		if len(ids) == 0 {
-			continue
-		}
-		sort.Strings(ids)
-		gen := make([]*dbt.Node, 0, len(ids))
-		for _, pid := range ids {
-			if n, ok := g.Nodes[pid]; ok {
-				gen = append(gen, n)
-			}
-		}
-		out = append(out, gen)
-	}
+	out := g.levels(id, g.parent)
 	g.gens[id] = out
 	return out
 }
 
-func (g *Graph) walk(id string, depth int, byDepth map[int][]string, visited map[string]bool) {
-	if depth > maxGenerations {
-		return
-	}
-	for _, dep := range g.parent[id] {
-		if visited[dep] {
-			continue
+// levels groups the nodes reachable from id through adj by the distance they were
+// first reached at, nearest first, each group sorted by unique_id.
+func (g *Graph) levels(id string, adj map[string][]string) [][]*dbt.Node {
+	byDepth := map[int][]string{}
+	visited := map[string]bool{id: true}
+	var walk func(string, int)
+	walk = func(from string, depth int) {
+		if depth > maxGenerations {
+			return
 		}
-		visited[dep] = true
-		if _, ok := g.Nodes[dep]; !ok {
-			continue
+		for _, next := range adj[from] {
+			if visited[next] {
+				continue
+			}
+			visited[next] = true
+			if _, ok := g.Nodes[next]; !ok {
+				continue
+			}
+			byDepth[depth] = append(byDepth[depth], next)
+			walk(next, depth+1)
 		}
-		byDepth[depth] = append(byDepth[depth], dep)
-		g.walk(dep, depth+1, byDepth, visited)
 	}
+	walk(id, 1)
+
+	// Depths are contiguous: a node is only recorded while walking one a level up.
+	out := make([][]*dbt.Node, 0, len(byDepth))
+	for d := 1; d <= len(byDepth); d++ {
+		ids := byDepth[d]
+		sort.Strings(ids)
+		gen := make([]*dbt.Node, 0, len(ids))
+		for _, nid := range ids {
+			gen = append(gen, g.Nodes[nid])
+		}
+		out = append(out, gen)
+	}
+	return out
 }
 
 // Descendants returns the nodes downstream of id, grouped by distance and nearest
@@ -207,30 +203,7 @@ func (g *Graph) Descendants(id string) [][]*dbt.Node {
 		return cached
 	}
 
-	var out [][]*dbt.Node
-	visited := map[string]bool{id: true}
-	level := append([]string(nil), g.child[id]...)
-	for depth := 0; depth < maxGenerations && len(level) > 0; depth++ {
-		var gen []*dbt.Node
-		var next []string
-		for _, cid := range level {
-			if visited[cid] {
-				continue
-			}
-			visited[cid] = true
-			if n, ok := g.Nodes[cid]; ok {
-				gen = append(gen, n)
-			}
-			next = append(next, g.child[cid]...)
-		}
-		if len(gen) > 0 {
-			sort.Slice(gen, func(i, j int) bool { return gen[i].UniqueID < gen[j].UniqueID })
-			out = append(out, gen)
-		}
-		sort.Strings(next)
-		level = next
-	}
-
+	out := g.levels(id, g.child)
 	if g.descendant == nil {
 		g.descendant = map[string][][]*dbt.Node{}
 	}
