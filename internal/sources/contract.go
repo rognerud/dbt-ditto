@@ -11,7 +11,7 @@
 // binary keeps its two pure-Go dependencies, a provider can be written in any
 // language, and adding a warehouse needs no change here.
 //
-// See .agents/source-providers.md for the design and the reasoning.
+// See docs/source-providers.md for the design and the reasoning.
 package sources
 
 // ContractVersion is the wire format both sides agree on. Unknown fields are

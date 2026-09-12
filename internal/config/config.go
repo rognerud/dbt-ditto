@@ -196,7 +196,7 @@ type Output struct {
 // credentials and a network call, none of which belong in a binary whose
 // premise is reading artifacts off disk. So a provider is a separate program:
 // dbt-ditto writes it the sources it wants answers for and reads documentation
-// back. See .agents/source-providers.md.
+// back. See docs/source-providers.md.
 type Sources struct {
 	Providers []SourceProvider `yaml:"providers"`
 	// Strict fails the run when a provider does. Off by default: a tool that

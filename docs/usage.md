@@ -85,10 +85,10 @@ so the two formats cannot drift: every key, default and nested section has one
 definition. `[tool.dbt_ditto]` is accepted as well, since the underscore and the
 hyphen are the same name to anyone writing it.
 
-Every other key is optional and defaults to dbt-osmosis' behaviour. The
-[README](../README.md#settings) tables every key with its default and what
-changing it does; [`internal/config/config.go`](../internal/config/config.go) is
-the source of truth. The ones people actually reach for:
+Every other key is optional and defaults to dbt-osmosis' behaviour.
+[Settings](#settings) below tables every key with its default and what changing
+it does; [`internal/config/config.go`](../internal/config/config.go) is the
+source of truth. The ones people actually reach for:
 
 ```yaml
 inheritance:
@@ -120,6 +120,79 @@ output:
 
 loom: true                # read dbt_loom.config.yml for upstream manifests
 ```
+
+## Settings
+
+Every key, with its default — as YAML in `dbt_ditto.yml`, or under
+`[tool.dbt-ditto]` in `pyproject.toml`. Defaults reproduce dbt-osmosis, except
+`inheritance.progenitor`. Each row is enforced by a test that runs the tool twice
+and checks the described difference actually appears
+([`internal/runner/settings_test.go`](../internal/runner/settings_test.go)).
+
+**Which projects take part**
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `projects[].path` | — | point at a dbt project directory — the one holding `dbt_project.yml`. Relative paths are resolved against the config file |
+| `projects[].target` | `<path>/target` | read `manifest.json` / `catalog.json` from somewhere else, e.g. a directory CI downloaded them into |
+| `projects[].manifest` | — | add an upstream that is only a `manifest.json(.gz)`, with no checkout. Always read-only |
+| `projects[].upstream` | `false` | take documentation *from* this project but never write its YAML |
+| `loom` | `true` | set `false` to ignore `dbt_loom.config.yml`. When on, its `type: file` manifests are loaded as upstreams |
+
+**What travels between columns**
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `inheritance.columns` | `true` | set `false` to stop inheriting altogether, leaving only column sync and file organisation |
+| `inheritance.node_description` | `false` | set `true` to give a model the description of the model above it, not just its columns' |
+| `inheritance.meta` | `true` | set `false` to leave `meta` alone; on, an ancestor's keys are merged in and win collisions |
+| `inheritance.tags` | `true` | set `false` to leave `tags` alone; on, ancestors' tags are added to the column's own |
+| `inheritance.case_insensitive` | `true` | set `false` to stop `ID` matching an upstream `id`, e.g. on Snowflake |
+| `inheritance.force` | `false` | set `true` to replace descriptions already written by hand. Off, a documented column is never touched |
+| `inheritance.placeholders` | dbt-osmosis' list | replace the wordings that count as "not really documented" upstream, and so do not get inherited |
+| `inheritance.skip_meta_keys` | none | name meta keys that must stay put — `owner` on an upstream table is about that table |
+| `inheritance.backfill.enabled` | `false` | set `true` to document a column from the models *below* it, which is the only way to reach a source |
+| `inheritance.backfill.sources_only` | `true` | set `false` to backfill models as well, letting a mart's wording flow back up into what feeds it |
+| `inheritance.derived.enabled` | `false` | set `true` to follow a column through a rename — `sum(amount_cents) as total_amount_cents` keeps the documentation |
+| `inheritance.derived.structs` | `true` | set `false` to stop matching `profile.first_name` to a flat `first_name`, and the reverse |
+| `inheritance.derived.aggregates` | `true` | set `false` to stop matching `total_amount_cents` to `amount_cents` |
+| `inheritance.derived.prefixes` | `sum`, `total`, `avg`, … | replace the words stripped from the front of a name before matching |
+| `inheritance.derived.suffixes` | `sum`, `count`, `cnt`, … | replace the words stripped from the end. Dropping `count` stops `order_id_count` inheriting from `order_id` |
+
+**Pointing at an answer, and recording where it came from**
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `inheritance.directives` | `true` | set `false` to treat `description: "Inherited: stg_customers.customer_id"` as ordinary prose instead of a pointer |
+| `inheritance.directive_prefix` | `Inherited:` | change the marker that makes a description a pointer |
+| `inheritance.progenitor` | `true` | set `false` for byte parity with dbt-osmosis. On, an inherited description records the node it came from |
+| `inheritance.progenitor_key` | `osmosis_progenitor` | rename that meta key |
+| `inheritance.warn_ambiguous` | `true` | set `false` to stop reporting columns whose parents disagree, where the winner is decided by `unique_id` order |
+| `inheritance.ambiguity_meta` | `false` | set `true` to record that disagreement in the column's meta, where it stays after the warning has scrolled away |
+| `inheritance.ambiguity_key` | `dbt_ditto_ambiguous` | rename that meta key |
+
+**What the column list looks like afterwards**
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `columns.add_missing` | `true` | set `false` to leave the YAML's column list alone instead of adding what the warehouse has |
+| `columns.remove_stale` | `true` | set `false` to keep columns the warehouse no longer reports |
+| `columns.data_types` | `true` | set `false` to stop writing `data_type:` from the catalog |
+| `columns.case` | `preserve` | `lower` or `upper` to re-case newly added column names. An already-written name is never churned |
+| `columns.order` | `catalog` | `alphabetical`, or `yaml` to keep the order the file already has |
+| `columns.expand_structs` | `true` | set `false` to document `profile` but not `profile.first_name`. On is what an adapter that understands nested data reports |
+| `columns.comments` | `new` | `always` to fill any undocumented column from the warehouse `COMMENT`, `never` to ignore comments |
+| `organize.enabled` | `true` | set `false` to leave every model in the file it is documented in today, ignoring `+dbt-ditto-path:` |
+| `organize.delete_empty` | `true` | set `false` to leave behind a schema file whose last model moved out |
+| `output.comments` | `follow` | `osmosis` to reproduce dbt-osmosis' loss of every YAML comment inside a column list except the first |
+
+Whether meta and tags are nested under `config:` is **not** a setting: dbt ≥ 1.9.6
+reads them there and older dbt does not read them there at all, so the manifest's
+own dbt version decides it. Nor is a project's name, which is whatever
+`dbt_project.yml` says and is what decides which nodes belong to it.
+
+Command-line flags — `--check`, `--dry-run`, `--select`, `-c`, `--verbose`,
+`--no-organize` — are listed by `dbt-ditto --help`.
 
 ## Cross-project inheritance
 

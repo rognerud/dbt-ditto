@@ -42,3 +42,6 @@ testdata/warehouse.duckdb
 
 # Local agent/tool state
 .claude/
+
+# Private working notes and development state, not published with the repo
+.agents/

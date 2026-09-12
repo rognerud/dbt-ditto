@@ -267,11 +267,12 @@ computes. What got it there:
 | `release.yml` | draft release **published** | version bump + tag move, cross-compiled archives, wheels, PyPI via trusted publishing, release assets |
 
 `scripts/check-versions.sh` gates a release on the tag and `pyproject.toml`
-agreeing. AGENTS.md covers the account-side setup each
-workflow needs.
+agreeing. AGENTS.md covers the PyPI setup that cannot be done from inside the
+repository.
 
-A release is a `v*` tag, not a merge: `main` is what CI proves, and the tag is
-what ships. The published artifacts are the source of truth for what a user has
+A release is the act of publishing the draft release that `draft-release.yml`
+maintains. Publishing creates the tag, and the tag is what ships; `main` is what
+CI proves. The published artifacts are the source of truth for what a user has
 installed.
 
 ## Packaging

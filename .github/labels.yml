@@ -29,7 +29,7 @@
 
 - name: documentation
   color: "0075ca"
-  description: "README, .agents/, or comments (patch)"
+  description: "README, docs/, or comments (patch)"
 
 - name: refactoring
   color: "c5def5"

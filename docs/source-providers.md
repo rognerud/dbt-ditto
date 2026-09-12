@@ -4,9 +4,8 @@ Optional bolt-ons that document **external sources**: the raw tables nothing in
 any loaded dbt project builds. They are the one place inheritance can never
 reach, because a source is a DAG root and there is nothing above it.
 
-This is a design record. Nothing here is implemented yet except where the
-Status section says otherwise. User-facing configuration belongs in
-[usage.md](usage.md) once it exists; the traps belong in [AGENTS.md](../AGENTS.md).
+This is the design record for source providers. User-facing configuration
+belongs in [usage.md](usage.md); the traps belong in [AGENTS.md](../AGENTS.md).
 
 ## The problem
 
