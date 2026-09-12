@@ -17,8 +17,8 @@ VERSION="${VERSION:-0.0.0.dev0}"
 
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT}/.gocache/uv-cache}"
-export GOFLAGS="${GOFLAGS:--mod=vendor}"
 export GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}"
 mkdir -p "${TMPDIR}"
 
 # Locate uv by trying to run each candidate, rather than with `command -v`.

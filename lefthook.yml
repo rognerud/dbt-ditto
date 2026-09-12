@@ -17,11 +17,12 @@
 
 min_version: 1.5.0
 
-# Keep temporary files inside the repository, as the rest of the tooling does.
+# Keep temporary files and the caches inside the repository, as the rest of the
+# tooling does.
 env:
   TMPDIR: "{root}/.gocache/tmp"
-  GOFLAGS: "-mod=vendor"
   GOCACHE: "{root}/.gocache/go-build"
+  GOMODCACHE: "{root}/.gocache/mod"
 
 pre-commit:
   parallel: true

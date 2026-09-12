@@ -13,10 +13,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Everything is vendored, so no job ever resolves modules from the network.
-  GOFLAGS: -mod=vendor
-
 jobs:
   # The whole Go suite needs no dbt, no Python and no warehouse — that is the
   # design — so it runs on both platforms the binary is used on.
@@ -46,6 +42,20 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build -o bin/dbt-ditto ./cmd/dbt-ditto
+
+  # The behaviour specifications in features/, run as tests. They are the same
+  # promises the Go tests pin down, stated in the language an analyst would use,
+  # and they get their own job so a failure reads as "this behaviour changed"
+  # rather than being one line in the middle of the suite.
+  features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./internal/features/ -v
 
   race:
     runs-on: ubuntu-latest

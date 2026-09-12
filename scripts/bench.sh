@@ -20,7 +20,7 @@ export DBT_DITTO_DB="${ROOT}/testdata/warehouse.duckdb"
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 mkdir -p "${TMPDIR}"
 
-GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}" \
   go build -o "${BIN}" "${ROOT}/cmd/dbt-ditto"
 
 rm -rf "${WORK}"
@@ -104,6 +104,6 @@ fi
 
 echo
 echo "Scaling (synthetic projects, Go benchmarks):"
-GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}" \
   go test -run '^$' -bench 'BenchmarkRun$|BenchmarkRunNoOp' -benchtime 5x \
   "${ROOT}/internal/runner" | grep -E '^Benchmark'

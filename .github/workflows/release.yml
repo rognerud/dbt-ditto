@@ -20,9 +20,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GOFLAGS: -mod=vendor
-
 jobs:
   # pyproject.toml carries a version by hand and the tag is the authority, so
   # the file is brought to the tag rather than the release being refused for

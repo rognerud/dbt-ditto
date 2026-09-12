@@ -125,7 +125,7 @@ progenitor_off=$'s#^inheritance:$#inheritance:\\\n  progenitor: false#'
   sed -e 's#projects/#./#' -e "${progenitor_off}" "${ROOT}/testdata/dbt_ditto.yml"
   printf '\ncolumns:\n  comments: never\n\noutput:\n  comments: osmosis\n'
 } >"${WORK}/dbt-ditto/dbt_ditto.yml"
-GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}" \
   go run "${ROOT}/cmd/dbt-ditto" inherit \
   -c "${WORK}/dbt-ditto/dbt_ditto.yml" >"${WORK}/dbt-ditto.log" 2>&1 ||
   { cat "${WORK}/dbt-ditto.log"; exit 1; }
@@ -147,7 +147,7 @@ rm -rf "${WORK}/canon"
 mkdir -p "${WORK}/canon"
 cp -R "${WORK}/osmosis/platform" "${WORK}/canon/osmosis"
 cp -R "${WORK}/dbt-ditto/platform" "${WORK}/canon/dbt-ditto"
-GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}" \
   go run "${ROOT}/scripts/canon" "${WORK}/canon/osmosis" "${WORK}/canon/dbt-ditto"
 
 STATUS=0
@@ -182,7 +182,7 @@ echo "==> refreshing ${LOOM_GOLDEN}"
 rm -rf "${WORK}/default" "${LOOM_GOLDEN}"
 cp -R "${ROOT}/testdata/projects" "${WORK}/default"
 sed 's#projects/#./#' "${ROOT}/testdata/dbt_ditto.yml" >"${WORK}/default/dbt_ditto.yml"
-GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}" \
   go run "${ROOT}/cmd/dbt-ditto" inherit -c "${WORK}/default/dbt_ditto.yml" >/dev/null
 mkdir -p "${LOOM_GOLDEN}/analytics"
 ( cd "${WORK}/default/analytics" && find . -name '*.yml' -not -path './target/*' -not -path './logs/*' \

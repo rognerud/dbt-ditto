@@ -1,14 +1,16 @@
-# All Go work runs vendored, with the build cache and temporary files kept
-# inside the repository so nothing depends on writable state elsewhere.
-export GOFLAGS := -mod=vendor
-export GOCACHE := $(CURDIR)/.gocache/go-build
-export TMPDIR  := $(CURDIR)/.gocache/tmp
+# The build cache, the module cache and temporary files are kept inside the
+# repository, so nothing depends on writable state elsewhere. Dependencies are
+# resolved against go.sum rather than vendored: the module cache below is
+# populated once and every later build reads it without reaching the network.
+export GOCACHE    := $(CURDIR)/.gocache/go-build
+export GOMODCACHE := $(CURDIR)/.gocache/mod
+export TMPDIR     := $(CURDIR)/.gocache/tmp
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse -q --verify HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build test test-short race vet bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
+.PHONY: all build test test-short features race vet bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
 
 all: vet test build
 
@@ -19,6 +21,10 @@ build: | $(TMPDIR)
 ## test: run the whole test suite, including the recorded dbt-osmosis parity proof
 test: | $(TMPDIR)
 	go test ./...
+
+## features: run the behaviour specifications in features/, with their output
+features: | $(TMPDIR)
+	go test ./internal/features/ -v
 
 ## test-short: the quick subset the pre-commit hook runs
 test-short: | $(TMPDIR)

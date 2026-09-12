@@ -20,8 +20,9 @@ wheels/
 *.prof
 coverage.txt
 
-# NOTE: vendor/ is committed on purpose. The Makefile and CI both run with
-# GOFLAGS=-mod=vendor so no build ever resolves modules from the network.
+# Dependencies are resolved from the module cache against go.sum, not vendored.
+# A local `go mod vendor` is somebody's own business and is not committed.
+/vendor/
 
 # dbt run state (the parsed artifacts under testdata/*/target are committed on
 # purpose: the tests read them)

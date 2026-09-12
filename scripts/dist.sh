@@ -20,8 +20,8 @@ COMMIT="$(git -C "${ROOT}" rev-parse -q --verify HEAD 2>/dev/null || echo unknow
 # bytes, which is what lets anyone verify a published binary.
 DATE="$(date -u -r "${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y-%m-%dT%H:%M:%SZ)"
 
-export GOFLAGS="${GOFLAGS:--mod=vendor}"
 export GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}"
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 export CGO_ENABLED=0
 mkdir -p "${TMPDIR}"

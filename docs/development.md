@@ -9,6 +9,7 @@ Build, test, prove and release. User-facing configuration is in
 ```sh
 make                 # vet, test, build
 make test            # includes the recorded parity proof
+make features        # the behaviour specifications in features/, with output
 make race            # the same under the race detector
 make parity          # runs the real dbt-osmosis and refreshes the golden files
 make bench           # head-to-head timing, then synthetic scaling
@@ -25,7 +26,10 @@ make verify-wheels   # build them and prove they install and run under pip and u
 `make parity`, `make bench`, `make fixture`, `make providers`
 and the wheel targets need the Python environment (`uv sync`); everything else
 needs only Go.
-All Go work runs vendored, with the build cache inside the repository.
+Dependencies are resolved against `go.sum` from a module cache kept inside the
+repository (`.gocache/mod`), as is the build cache, so nothing depends on
+writable state elsewhere. The first build populates the cache and needs the
+network; later ones do not.
 
 ## Repository layout
 
@@ -40,6 +44,10 @@ internal/runner/      orchestration, selection, path templates, YAML writing
 internal/sources/     source providers: the contract, the subprocess, the cache,
                       and label routing
 internal/yamlfile/    yaml.Node editing that preserves comments and key order
+internal/canon/       sorts the named entries in a schema file, so two trees can
+                      be compared without comparing dbt's node order
+internal/features/    the step definitions behind features/
+features/             behaviour specifications in Gherkin, run as tests
 testdata/projects/    the two-project DuckDB fixture
 testdata/golden/      recorded dbt-osmosis output, and dbt-ditto's own for the
                       cross-project case
