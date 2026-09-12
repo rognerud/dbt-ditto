@@ -132,12 +132,30 @@ GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}
 
 echo
 echo "==> diff (platform schema YAML)"
+# Both trees are copied and canonicalised first, so the diff does not depend on
+# the order dbt happened to list its nodes in. Entries sharing a schema file are
+# written in manifest order by both tools, but they learn that order by
+# different routes: dbt-osmosis parses the project on every run, while dbt-ditto
+# reads the committed target/manifest.json that the parse above was restored
+# over. dbt makes no promise about that order, so it differs by machine — on the
+# CI runner the platform seeds come out in the opposite order to the recorded
+# manifest — and comparing it asserts something neither tool claims. Entry order
+# within a file is proved separately, by the Go tests against the recorded
+# manifest. The copies keep the uncanonicalised output for the golden refresh
+# below.
+rm -rf "${WORK}/canon"
+mkdir -p "${WORK}/canon"
+cp -R "${WORK}/osmosis/platform" "${WORK}/canon/osmosis"
+cp -R "${WORK}/dbt-ditto/platform" "${WORK}/canon/dbt-ditto"
+GOFLAGS="${GOFLAGS:--mod=vendor}" GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" \
+  go run "${ROOT}/scripts/canon" "${WORK}/canon/osmosis" "${WORK}/canon/dbt-ditto"
+
 STATUS=0
 diff -ru \
   --exclude=target --exclude=logs --exclude='*.sql' --exclude='*.csv' \
   --exclude='*.md' --exclude='.user.yml' --exclude='dbt_project.yml' \
   --exclude='profiles.yml' \
-  "${WORK}/osmosis/platform" "${WORK}/dbt-ditto/platform" || STATUS=1
+  "${WORK}/canon/osmosis" "${WORK}/canon/dbt-ditto" || STATUS=1
 
 if [[ ${STATUS} -eq 0 ]]; then
   echo "    identical"
