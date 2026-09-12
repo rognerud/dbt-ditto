@@ -1,0 +1,17 @@
+version: 2
+models:
+  - name: region_report
+    columns:
+      - name: region_code
+        description: ISO 3166-1 alpha-2 code for the region.
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: geo-team
+            osmosis_progenitor: model.platform.dim_regions
+      - name: region_name
+        description: Human readable region name, in English.
+        data_type: VARCHAR
+        config:
+          meta:
+            osmosis_progenitor: model.platform.dim_regions

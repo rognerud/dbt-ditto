@@ -1,0 +1,55 @@
+version: 2
+
+seeds:
+  - name: raw_customers
+    description: Raw customer records as delivered by the CRM export.
+    columns:
+      - name: customer_id
+        description: '{{ doc("customer_id") }}'
+        tags:
+          - primary_key
+        meta:
+          pii: false
+          owner: platform-team
+      - name: first_name
+        description: Customer given name, as typed by the customer.
+        meta:
+          pii: true
+          owner: platform-team
+      - name: last_name
+        description: Customer family name, as typed by the customer.
+        meta:
+          pii: true
+          owner: platform-team
+      - name: signup_country
+        description: ISO 3166-1 alpha-2 country the customer signed up from.
+        meta:
+          pii: false
+          owner: platform-team
+
+  - name: raw_orders
+    description: Raw order lines as delivered by the commerce platform.
+    columns:
+      - name: order_id
+        description: Surrogate key for an order.
+        tags:
+          - primary_key
+        meta:
+          owner: commerce-team
+      - name: customer_id
+        description: '{{ doc("customer_id") }}'
+        meta:
+          pii: false
+          owner: platform-team
+      - name: order_date
+        description: Calendar date the order was placed, in UTC.
+        meta:
+          owner: commerce-team
+      - name: status
+        description: '{{ doc("order_status") }}'
+        meta:
+          owner: commerce-team
+      - name: amount_cents
+        description: Order gross value in minor currency units.
+        meta:
+          owner: commerce-team

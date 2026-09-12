@@ -1,0 +1,4 @@
+order_id,customer_id,status,amount_cents,channel
+1,10,completed,1500,web
+2,11,pending,2400,retail
+3,10,returned,900,web

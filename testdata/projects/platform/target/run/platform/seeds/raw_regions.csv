@@ -1,0 +1,13 @@
+
+    
+    
+    
+    create table "warehouse"."main"."raw_regions" ("region_code" text,"region_name" text)
+  ;
+    -- dbt seed --
+    
+          COPY "warehouse"."main"."raw_regions" FROM '/Users/gislerognerud/Documents/Github/dbt-ditto/testdata/projects/platform/seeds/raw_regions.csv' (FORMAT CSV, HEADER TRUE, DELIMITER ',')
+        
+
+;
+  

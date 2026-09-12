@@ -1,0 +1,20 @@
+# The same conservative project as testdata/matrix/project, aimed at Snowflake.
+# It is built through fakesnow, so no Snowflake account is involved; see
+# scripts/lib/dbt_fakesnow.py.
+name: matrix
+version: "1.0.0"
+config-version: 2
+profile: matrix
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+
+models:
+  matrix:
+    +materialized: table
+    +dbt-osmosis: "_{model}.yml"
+
+seeds:
+  matrix:
+    +dbt-osmosis: "_seeds.yml"

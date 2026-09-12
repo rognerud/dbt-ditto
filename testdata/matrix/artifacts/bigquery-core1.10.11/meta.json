@@ -1,0 +1,8 @@
+{
+  "adapter": "bigquery",
+  "adapter_version": "1.10.1",
+  "dbt_version": "1.10.11",
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+  "manifest_from": "dbt parse",
+  "catalog_from": "hand-built, see testdata/matrix/bigquery/catalog.json"
+}

@@ -1,0 +1,33 @@
+version: 2
+models:
+  - name: customer_region_report
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+            osmosis_progenitor: seed.platform.raw_customers
+          tags:
+            - primary_key
+      - name: signup_country
+        description: TODO
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: mart-team
+            sensitivity: low
+            osmosis_progenitor: model.platform.dim_customers
+          tags:
+            - mart_local
+      - name: region_name
+        description: Human readable region name, in English.
+        data_type: VARCHAR
+        config:
+          meta:
+            osmosis_progenitor: model.platform.dim_regions
+      - name: lifetime_value_eur
+        data_type: DOUBLE

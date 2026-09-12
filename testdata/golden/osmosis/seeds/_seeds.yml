@@ -1,0 +1,87 @@
+version: 2
+seeds:
+  - name: raw_customers
+    description: Raw customer records as delivered by the CRM export.
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+          tags:
+            - primary_key
+      - name: first_name
+        description: Customer given name, as typed by the customer.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: last_name
+        description: Customer family name, as typed by the customer.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: signup_country
+        description: ISO 3166-1 alpha-2 country the customer signed up from.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+  - name: raw_orders
+    description: Raw order lines as delivered by the commerce platform.
+    columns:
+      - name: order_id
+        description: Surrogate key for an order.
+        data_type: INTEGER
+        config:
+          meta:
+            owner: commerce-team
+          tags:
+            - primary_key
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+      - name: order_date
+        description: Calendar date the order was placed, in UTC.
+        data_type: DATE
+        config:
+          meta:
+            owner: commerce-team
+      - name: status
+        description: 'Order lifecycle state: one of completed, pending or returned.'
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: commerce-team
+      - name: amount_cents
+        description: Order gross value in minor currency units.
+        data_type: INTEGER
+        config:
+          meta:
+            owner: commerce-team
+  - name: raw_regions
+    columns:
+      - name: region_code
+        data_type: VARCHAR
+      - name: region_name
+        data_type: VARCHAR
+  - name: raw_invoices
+    columns:
+      - name: invoice_id
+        data_type: INTEGER
+      - name: order_id
+        data_type: INTEGER
+      - name: invoice_total_cents
+        data_type: INTEGER
+      - name: issued_on
+        data_type: DATE

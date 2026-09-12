@@ -1,0 +1,22 @@
+# A deliberately small, conservative project. It is rebuilt against every dbt
+# version in the matrix, so it may only use features that exist in all of them:
+# the point is to compare the *shape of the artifacts* each version writes, not
+# to exercise dbt's feature surface. The rich fixture in testdata/projects does
+# that, against one pinned version.
+name: matrix
+version: "1.0.0"
+config-version: 2
+profile: matrix
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+
+models:
+  matrix:
+    +materialized: table
+    +dbt-osmosis: "_{model}.yml"
+
+seeds:
+  matrix:
+    +dbt-osmosis: "_seeds.yml"

@@ -1,0 +1,15 @@
+# Points at the throwaway container scripts/matrix.sh starts. The port is
+# deliberately not 5432, so a Postgres already running on the machine is never
+# touched.
+matrix:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_DITTO_PG_HOST', '127.0.0.1') }}"
+      port: "{{ env_var('DBT_DITTO_PG_PORT', '55432') | int }}"
+      user: dbt_ditto
+      password: dbt_ditto
+      dbname: dbt_ditto
+      schema: public
+      threads: 4

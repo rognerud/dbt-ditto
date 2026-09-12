@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Everything is vendored, so no job ever resolves modules from the network.
+  GOFLAGS: -mod=vendor
+
+jobs:
+  # The whole Go suite needs no dbt, no Python and no warehouse — that is the
+  # design — so it runs on both platforms the binary is used on.
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "not gofmt'd:" >&2
+            echo "${unformatted}" >&2
+            exit 1
+          fi
+        shell: bash
+
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build -o bin/dbt-ditto ./cmd/dbt-ditto
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: python syntax
+        run: python3 -m compileall -q packaging scripts
+
+  # The source providers are Python, so their own logic needs a Python job.
+  # Neither BigQuery nor Snowflake is reached: this covers the contract,
+  # profiles.yml resolution and the type rendering that has to match each dbt
+  # adapter. That dbt-ditto and a provider agree about the wire format is proved
+  # in Go, by TestPythonProviderRoundTrip, in the job above.
+  providers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: ./scripts/providers.sh
+
+  # The macros in packaging/dbt-ditto run inside dbt's own Jinja, which Go
+  # cannot reach. This is the only thing that tests them.
+  dbt-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: ./scripts/dbt-package.sh
+
+  # The parity proof, run for real: dbt-osmosis against dbt-ditto over the
+  # DuckDB fixture. `go test` replays the recorded result, but only this catches
+  # dbt-osmosis itself changing under us.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: ./scripts/parity.sh --check

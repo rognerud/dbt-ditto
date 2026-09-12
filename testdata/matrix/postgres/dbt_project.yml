@@ -1,0 +1,31 @@
+# The same conservative project as testdata/matrix/project, aimed at Postgres,
+# which runs in a container. dbt-postgres is dbt's reference adapter, so it is
+# the closest thing to a control against which the others can be read.
+name: matrix
+version: "1.0.0"
+config-version: 2
+profile: matrix
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+
+models:
+  matrix:
+    +materialized: table
+    +dbt-osmosis: "_{model}.yml"
+
+seeds:
+  matrix:
+    +dbt-osmosis: "_seeds.yml"
+    raw_orders:
+      # `channel` is deliberately absent from seeds/_seeds.yml, so the only
+      # description of it anywhere is this one, written in the database rather
+      # than in dbt. Postgres reports it through its catalog query, which is
+      # what proves warehouse comments work on a second adapter and not just on
+      # DuckDB.
+      #
+      # It has to be an undocumented column: a description written by hand
+      # always beats the warehouse, so commenting an already-documented column
+      # would prove nothing.
+      +post-hook: "COMMENT ON COLUMN {{ this }}.channel IS 'Sales channel the order arrived through.'"

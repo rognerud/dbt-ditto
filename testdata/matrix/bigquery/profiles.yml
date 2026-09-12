@@ -1,0 +1,14 @@
+# No credentials: scripts/lib/dbt_fakebq.py replaces the BigQuery client with
+# one aimed at the local emulator, using anonymous credentials. `method: oauth`
+# is the profile shape that gets there without asking for a key file.
+matrix:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: dbt_ditto
+      dataset: matrix
+      location: US
+      threads: 1
+      retries: 0

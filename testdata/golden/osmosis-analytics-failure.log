@@ -1,0 +1,110 @@
+INFO     🌊 Executing dbt-osmosis                                    main.py:559
+                                                                                
+INFO     👋 Creating DBT project context using config =>           config.py:649
+         DbtConfiguration(project_dir='/Users/gislerognerud/Docume              
+         nts/Github/dbt-ditto/.gocache/parity/osmosis/analytics',              
+                                                                                
+         profiles_dir='/Users/gislerognerud/Documents/Github/looms              
+         mosis/.gocache/parity/osmosis/analytics', target=None,                 
+         profile=None, threads=None, single_threaded=None,                      
+         vars={}, quiet=True, disable_introspection=False)                      
+[0m06:56:04  Initializing dbt-loom=0.9.6
+[0m06:56:04  dbt-loom: Patching ref protection methods to support dbt-loom dependencies.
+[0m06:56:04  dbt-loom: Loading manifest for `platform` from `file`
+[0m06:56:04  dbt-loom: Injecting nodes
+[0m06:56:04  Initializing dbt-loom=0.9.6
+[0m06:56:04  dbt-loom: Patching ref protection methods to support dbt-loom dependencies.
+[0m06:56:04  dbt-loom: Loading manifest for `platform` from `file`
+INFO     🔄 Loaded dbt loom manifests!                             config.py:533
+INFO     🔄 added 2 exposed nodes from platform to the dbt         config.py:540
+         manifest!                                                              
+INFO     ✨ DbtProjectContext successfully created!                config.py:681
+INFO     📓 Osmosis ThreadPoolExecutor max_workers using dbt     settings.py:399
+         threads => 1                                                           
+INFO     🏭 Creating missing source YAMLs and updating    path_management.py:564
+         existing sources (if any).                                             
+INFO     💡 Drafting restructure delta plan for the         restructuring.py:304
+         project.                                                               
+INFO     🌐 Building YAML file mapping...                 path_management.py:301
+INFO     ✨ No current YAML file, building minimal doc =>   restructuring.py:116
+         model.analytics.customer_report                                        
+INFO     ✨ No current YAML file, building minimal doc =>   restructuring.py:116
+         model.analytics.region_report                                          
+INFO     ✨ No current YAML file, building minimal doc =>   restructuring.py:116
+         model.analytics.customer_region_report                                 
+INFO     🌟 Draft plan creation complete => 3 operations    restructuring.py:308
+INFO     ✍ Writing changes to =>                                   writer.py:220
+         /Users/gislerognerud/Documents/Github/dbt-ditto/.gocache              
+         /parity/osmosis/analytics/models/_customer_report.yml                  
+INFO     ✍ Writing changes to =>                                   writer.py:220
+         /Users/gislerognerud/Documents/Github/dbt-ditto/.gocache              
+         /parity/osmosis/analytics/models/_region_report.yml                    
+INFO     ✍ Writing changes to =>                                   writer.py:220
+         /Users/gislerognerud/Documents/Github/dbt-ditto/.gocache              
+         /parity/osmosis/analytics/models/_customer_region_report.              
+         yml                                                                    
+INFO     🔄 Committing any buffered restructure changes.    restructuring.py:606
+INFO     📥 Committing all YAMLs from buffer cache to disk.        writer.py:361
+INFO     🔄 Reloading the dbt project manifest.             restructuring.py:616
+INFO     🔄 Reloading the dbt project manifest!                    config.py:699
+Traceback (most recent call last):
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/bin/dbt-osmosis", line 10, in <module>
+    sys.exit(cli())
+             ~~~^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 1631, in __call__
+    return self.main(*args, **kwargs)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 1552, in main
+    rv = self.invoke(ctx)
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 2032, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 2032, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 1415, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/click/core.py", line 910, in invoke
+    return callback(*args, **kwargs)
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/cli/main.py", line 265, in wrapper
+    return func(*args, **wrapper_kwargs)
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/cli/main.py", line 423, in wrapper
+    return func(*args, **kwargs)
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/cli/main.py", line 216, in wrapper
+    return func(*args, **kwargs)
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/cli/main.py", line 578, in refactor
+    apply_restructure_plan(
+    ~~~~~~~~~~~~~~~~~~~~~~^
+        context=typed_context,
+        ^^^^^^^^^^^^^^^^^^^^^^
+        plan=draft_restructure_delta_plan(typed_context),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        confirm=not auto_apply,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/core/restructuring.py", line 651, in apply_restructure_plan
+    _commit_restructure_changes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        context,
+        ^^^^^^^^
+        starting_disk_mutations=starting_disk_mutations,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        written_file_tracker=written_file_tracker,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/core/restructuring.py", line 617, in _commit_restructure_changes
+    _reload_manifest(context.project)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_osmosis/core/config.py", line 703, in _reload_manifest
+    context._project.parse_project(write_manifest=False)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt_core_interface/project.py", line 581, in parse_project
+    self.__manifest_loader.build_manifest_state_check()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/gislerognerud/Documents/Github/dbt-ditto/.venv/lib/python3.14/site-packages/dbt/parser/manifest.py", line 1208, in build_manifest_state_check
+    path = os.path.join(project.project_root, "dbt_project.yml")
+                        ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'LoomRunnableConfig' object has no attribute 'project_root'

@@ -1,0 +1,44 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Go build output and caches
+/bin/
+/dist/
+/.gocache/
+
+# Go test binaries (`go test -c`, `go test -o`) and profile output
+*.test
+*.out
+*.prof
+coverage.txt
+
+# NOTE: vendor/ is committed on purpose. The Makefile and CI both run with
+# GOFLAGS=-mod=vendor so no build ever resolves modules from the network.
+
+# dbt run state (the parsed artifacts under testdata/*/target are committed on
+# purpose: the tests read them)
+testdata/projects/*/logs/
+testdata/projects/*/target/partial_parse.msgpack
+testdata/projects/*/target/graph*.gpickle
+testdata/projects/*/target/index.html
+.dbt/
+
+# Generated fixture warehouse (scripts/build-fixture.sh rebuilds it)
+testdata/warehouse.duckdb
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local agent/tool state
+.claude/

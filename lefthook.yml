@@ -1,0 +1,107 @@
+# Git hooks. Install once with `lefthook install`, or `make hooks`.
+#
+# The split follows how expensive each check is and how much it can be trusted
+# to be reproducible:
+#
+#   pre-commit   fast, pure Go, no network, no containers. Must stay under a
+#                second or two or people will start passing --no-verify.
+#   pre-push     the whole Go suite, including every captured dbt version and
+#                adapter. Still no Python and no containers, so it is honest to
+#                make it blocking.
+#
+# Anything that needs dbt, Docker or the network — regenerating the matrix
+# artifacts, the live dbt-osmosis parity run — is deliberately *not* a hook. It
+# is slow, it reaches the network, and it rewrites committed fixtures, none of
+# which belongs in something that runs on every commit. Use `make matrix` and
+# `make parity` by hand, and let CI do the rest.
+
+min_version: 1.5.0
+
+# Keep temporary files inside the repository, as the rest of the tooling does.
+env:
+  TMPDIR: "{root}/.gocache/tmp"
+  GOFLAGS: "-mod=vendor"
+  GOCACHE: "{root}/.gocache/go-build"
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: gofmt
+      glob: "*.go"
+      # Formatting is rewritten rather than reported: there is no interesting
+      # decision for a human to make, and `stage_fixed` puts the result back in
+      # the commit.
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+
+    - name: vet
+      glob: "*.go"
+      # Package-scoped, not file-scoped: `go vet` wants packages, and vetting a
+      # subset of a package's files reports phantom errors.
+      run: go vet ./...
+
+    - name: unit tests
+      glob: "*.go"
+      # -short so the hook stays quick; the matrix and golden suites run on
+      # push, where a few seconds is affordable.
+      run: go test -short ./internal/...
+
+    - name: shellcheck
+      glob: "*.sh"
+      # Optional: skipped silently where shellcheck is not installed, because a
+      # missing linter should not block a commit.
+      run: |
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck {staged_files}
+        else
+          echo "shellcheck not installed, skipping"
+        fi
+
+    - name: shell syntax
+      glob: "*.sh"
+      # bash -n needs nothing installed and catches the class of error that
+      # actually bites here: an unbalanced quote or a malformed conditional in
+      # the matrix driver.
+      run: |
+        for f in {staged_files}; do bash -n "$f"; done
+
+    - name: python syntax
+      glob: "*.py"
+      run: |
+        for f in {staged_files}; do python3 -m py_compile "$f"; done
+
+    - name: artifacts are committed compressed
+      glob: "testdata/matrix/artifacts/**/*"
+      # An uncompressed manifest is a few hundred kilobytes of macro definitions
+      # nobody reads. The readers understand `.gz`, so there is no reason to
+      # commit the plain form.
+      #
+      # Only manifest and catalog are checked: meta.json lives in the same
+      # directory and is meant to be committed as it is, being a handful of
+      # lines a human reads.
+      run: |
+        for f in {staged_files}; do
+          case "$(basename "$f")" in
+            manifest.json|catalog.json)
+              echo "commit $f gzipped: see scripts/matrix.sh"
+              exit 1
+              ;;
+          esac
+        done
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: full test suite
+      # Covers the recorded dbt-osmosis parity proof and every captured dbt
+      # version and adapter — duckdb, postgres, snowflake, bigquery — none of
+      # which needs dbt, Docker or the network.
+      run: go test ./...
+
+    - name: race detector
+      # The resolve, load and save phases all run in parallel, so this is worth
+      # the extra few seconds before anything leaves the machine.
+      run: go test -race ./internal/...
+
+    - name: build
+      run: go build ./...

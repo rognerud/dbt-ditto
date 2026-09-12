@@ -1,0 +1,5 @@
+manifests:
+  - name: platform
+    type: file
+    config:
+      path: ../platform/target/manifest.json

@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  # Documented in the wrong file on purpose: the path rule for models/marts/finance
+  # says this belongs in _finance_models.yml, so organising must move it.
+  - name: fct_customer_revenue
+    description: One row per customer with revenue aggregates, for the finance team.
+    columns:
+      - name: lifetime_value_cents
+        description: Lifetime gross revenue from the customer, in minor units.

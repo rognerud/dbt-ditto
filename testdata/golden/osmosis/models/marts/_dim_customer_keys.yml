@@ -1,0 +1,20 @@
+version: 2
+models:
+  - name: dim_customer_keys
+    columns:
+      - name: CUSTOMER_ID
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+          tags:
+            - primary_key
+      - name: Signup_Country
+        description: ISO 3166-1 alpha-2 country the customer signed up from.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: false
+            owner: platform-team

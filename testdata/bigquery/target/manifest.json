@@ -1,0 +1,105 @@
+{
+  "metadata": {
+    "project_name": "bqshop",
+    "adapter_type": "bigquery",
+    "dbt_version": "1.10.2",
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json"
+  },
+  "nodes": {
+    "model.bqshop.stg_customers": {
+      "name": "stg_customers",
+      "resource_type": "model",
+      "package_name": "bqshop",
+      "database": "bq-project",
+      "schema": "analytics",
+      "alias": "stg_customers",
+      "relation_name": "`bq-project`.`analytics`.`stg_customers`",
+      "original_file_path": "models/staging/stg_customers.sql",
+      "patch_path": "bqshop://models/staging/_stg_customers.yml",
+      "path": "staging/stg_customers.sql",
+      "fqn": ["bqshop", "staging", "stg_customers"],
+      "description": "One row per customer, straight from the CRM extract.",
+      "config": {"materialized": "table", "dbt-osmosis": "_{model}.yml"},
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "description": "Surrogate key for a customer.",
+          "data_type": "INT64",
+          "config": {"meta": {"owner": "platform-team", "pii": false}, "tags": ["primary_key"]}
+        },
+        "email": {
+          "name": "email",
+          "description": "Customer contact address, restricted.",
+          "data_type": "STRING",
+          "policy_tags": ["projects/bq-project/locations/eu/taxonomies/1/policyTags/2"],
+          "config": {"meta": {"owner": "platform-team", "pii": true}}
+        },
+        "customer.first_name": {
+          "name": "customer.first_name",
+          "description": "Customer given name, as typed by the customer.",
+          "data_type": "STRING",
+          "config": {"meta": {"pii": true}}
+        },
+        "customer.address.city": {
+          "name": "customer.address.city",
+          "description": "City of the customer's billing address.",
+          "data_type": "STRING",
+          "config": {"meta": {"pii": true}}
+        },
+        "lifetime_value": {
+          "name": "lifetime_value",
+          "description": "Lifetime gross revenue from the customer.",
+          "data_type": "NUMERIC(38, 9)",
+          "config": {"meta": {"owner": "finance-team"}}
+        }
+      },
+      "depends_on": {"nodes": ["source.bqshop.crm.raw_customers"]}
+    },
+    "model.bqshop.dim_customers": {
+      "name": "dim_customers",
+      "resource_type": "model",
+      "package_name": "bqshop",
+      "database": "bq-project",
+      "schema": "analytics",
+      "alias": "dim_customers",
+      "original_file_path": "models/marts/dim_customers.sql",
+      "path": "marts/dim_customers.sql",
+      "fqn": ["bqshop", "marts", "dim_customers"],
+      "config": {"materialized": "table", "dbt-osmosis": "_{model}.yml"},
+      "columns": {},
+      "depends_on": {"nodes": ["model.bqshop.stg_customers"]}
+    },
+    "model.bqshop.fct_customer_totals": {
+      "name": "fct_customer_totals",
+      "resource_type": "model",
+      "package_name": "bqshop",
+      "database": "bq-project",
+      "schema": "analytics",
+      "alias": "fct_customer_totals",
+      "original_file_path": "models/marts/fct_customer_totals.sql",
+      "path": "marts/fct_customer_totals.sql",
+      "fqn": ["bqshop", "marts", "fct_customer_totals"],
+      "config": {"materialized": "table", "dbt-osmosis": "_{model}.yml"},
+      "columns": {},
+      "depends_on": {"nodes": ["model.bqshop.stg_customers"]}
+    }
+  },
+  "sources": {
+    "source.bqshop.crm.raw_customers": {
+      "name": "raw_customers",
+      "resource_type": "source",
+      "package_name": "bqshop",
+      "source_name": "crm",
+      "identifier": "raw_customers",
+      "database": "bq-project",
+      "schema": "raw",
+      "relation_name": "`bq-project`.`raw`.`raw_customers`",
+      "original_file_path": "models/staging/_sources.yml",
+      "path": "staging/_sources.yml",
+      "fqn": ["bqshop", "staging", "crm", "raw_customers"],
+      "description": "Raw CRM export. Nothing here is documented in dbt.",
+      "columns": {},
+      "depends_on": {"nodes": []}
+    }
+  }
+}

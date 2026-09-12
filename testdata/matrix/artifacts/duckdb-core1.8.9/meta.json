@@ -1,0 +1,6 @@
+{
+  "adapter": "duckdb",
+  "adapter_version": "1.8.4",
+  "dbt_version": "1.8.9",
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json"
+}

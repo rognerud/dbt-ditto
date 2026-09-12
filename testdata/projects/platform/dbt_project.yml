@@ -1,0 +1,30 @@
+name: platform
+version: "1.0.0"
+config-version: 2
+profile: platform
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  platform:
+    +materialized: table
+    # Read by both dbt-osmosis and dbt-ditto: one YAML file per model,
+    # written next to the .sql file.
+    +dbt-osmosis: "_{model}.yml"
+    marts:
+      finance:
+        # A folder-level rule: everything under marts/finance shares one file,
+        # which exercises moving a model between schema files.
+        +dbt-osmosis: "_{parent}_models.yml"
+
+seeds:
+  platform:
+    +dbt-osmosis: "_seeds.yml"
+    raw_invoices:
+      # A comment written in the warehouse rather than in dbt. For a source
+      # table this is often the only documentation there is, so it has to end up
+      # in the YAML.
+      +post-hook: "COMMENT ON COLUMN {{ this }}.order_id IS 'Order this invoice bills for, as recorded by the billing system.'"

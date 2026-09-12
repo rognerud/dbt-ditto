@@ -1,0 +1,34 @@
+version: 2
+models:
+  - name: dim_customer_flat
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+          tags:
+            - primary_key
+      - name: first_name
+        description: Customer given name, as typed by the customer.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: last_name
+        description: Customer family name, as typed by the customer.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: signup_country
+        description: ISO 3166-1 alpha-2 country the customer signed up from.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: false
+            owner: platform-team

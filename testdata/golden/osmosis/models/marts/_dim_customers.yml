@@ -1,0 +1,44 @@
+version: 2
+models:
+  - name: dim_customers
+    description: One row per customer, with lifetime order aggregates.
+    columns:
+      # Already documented locally: inheritance must leave this alone.
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+          tags:
+            - primary_key
+      - name: first_name
+        description: Not documented
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: last_name
+        description: Customer family name, as typed by the customer.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: platform-team
+      - name: signup_country
+        description: TODO
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: platform-team
+            pii: false
+            sensitivity: low
+          tags:
+            - mart_local
+      - name: lifetime_order_count
+        description: Number of orders the customer has ever placed.
+        data_type: BIGINT
+      - name: lifetime_value_cents
+        data_type: HUGEINT

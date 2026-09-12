@@ -1,0 +1,13 @@
+
+    
+    
+    
+    create table "warehouse"."main"."raw_customers" ("customer_id" integer,"first_name" text,"last_name" text,"signup_country" text)
+  ;
+    -- dbt seed --
+    
+          COPY "warehouse"."main"."raw_customers" FROM '/Users/gislerognerud/Documents/Github/dbt-ditto/testdata/projects/platform/seeds/raw_customers.csv' (FORMAT CSV, HEADER TRUE, DELIMITER ',')
+        
+
+;
+  

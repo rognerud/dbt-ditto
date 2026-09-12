@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: One row per customer, straight from the CRM extract.
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer.
+        config:
+          meta:
+            owner: platform-team
+            pii: false
+          tags:
+            - primary_key
+      - name: email
+        description: Customer contact address, restricted.
+        policy_tags:
+          - projects/bq-project/locations/eu/taxonomies/1/policyTags/2
+        config:
+          meta:
+            owner: platform-team
+            pii: true
+      - name: customer.first_name
+        description: Customer given name, as typed by the customer.
+        config:
+          meta:
+            pii: true
+      - name: customer.address.city
+        description: City of the customer's billing address.
+        config:
+          meta:
+            pii: true
+      - name: lifetime_value
+        description: Lifetime gross revenue from the customer.
+        config:
+          meta:
+            owner: finance-team

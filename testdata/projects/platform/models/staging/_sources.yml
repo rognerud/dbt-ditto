@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: crm
+    schema: main
+    description: Tables landed by the CRM replication job.
+    tables:
+      - name: raw_orders
+        description: Order lines exactly as the CRM emits them.
+        columns:
+          # Deliberately disagrees with seeds/_seeds.yml so that a model joining
+          # both has two upstreams claiming the same column.
+          - name: order_id
+            description: CRM-native order identifier, not stable across reloads.
+            tags:
+              - crm
+            meta:
+              owner: crm-team
+          - name: status
+            description: CRM status code, before the commerce mapping is applied.
+            meta:
+              owner: crm-team
+
+  - name: billing
+    description: Raw billing extracts. No column here is documented in dbt.
+    schema: main
+    tables:
+      - name: raw_invoices

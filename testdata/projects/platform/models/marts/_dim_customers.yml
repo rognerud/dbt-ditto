@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: One row per customer, with lifetime order aggregates.
+    columns:
+      # Already documented locally: inheritance must leave this alone.
+      - name: lifetime_order_count
+        description: Number of orders the customer has ever placed.
+      # "TODO" is not one of dbt-osmosis' placeholders, so it survives.
+      # `owner` and `pii` disagree with the upstream seed, which settles who
+      # wins a meta conflict; `sensitivity` exists only here.
+      - name: signup_country
+        description: TODO
+        meta:
+          owner: mart-team
+          pii: true
+          sensitivity: low
+        tags:
+          - mart_local
+      # "Not documented" IS a dbt-osmosis placeholder, but the local value is
+      # still non-empty, so it also survives: only empty descriptions inherit.
+      - name: first_name
+        description: Not documented
+      # No longer produced by the model: should be removed.
+      - name: legacy_customer_grade
+        description: Retired grading scheme from the old warehouse.
