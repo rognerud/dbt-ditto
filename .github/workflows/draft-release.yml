@@ -1,11 +1,8 @@
 name: draft release
 
 # Keeps the draft release on `main` current: every merge updates its notes and
-# recomputes the next version from the labels on the pull requests merged since
-# the last release. See .github/release-drafter.yml.
-#
-# This never tags and never publishes. Publishing the draft, by hand, is what
-# creates the tag — and that tag is what release.yml waits for.
+# recomputes the next version from the merged PRs' labels. See
+# .github/release-drafter.yml. This never tags and never publishes.
 
 on:
   push:

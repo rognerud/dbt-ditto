@@ -99,23 +99,28 @@ Snowflake behaviour — `INFORMATION_SCHEMA` corners the emulator does not
 implement, real `COMMENT` propagation, masking policies — still needs an
 account.
 
-BigQuery has no equivalent in-process fake. `testdata/bigquery` is therefore
-hand-built, with each detail traced back to the adapter's source; see the README
-there.
+## BigQuery, from a parse
 
-The closest approximation would be
-[`bigquery-emulator`](https://github.com/goccy/bigquery-emulator) under Docker,
-which would make BigQuery a generated row like this one. Two things stand in the
-way, and both are known rather than guessed:
+BigQuery has no equivalent in-process fake, so the `bigquery/` row is captured
+with `dbt parse`: no warehouse is needed, the manifest is genuinely
+dbt-bigquery's, and the catalog is the hand-built
+`bigquery/catalog.json`. `meta.json` records both facts. The deep coverage —
+nested `RECORD`s, `ARRAY<STRUCT<...>>`, policy tags — lives in
+`testdata/bigquery`, hand-built from the adapter's source.
 
+[`bigquery-emulator`](https://github.com/goccy/bigquery-emulator) under Docker
+would make this a generated row. Three things stand in the way today:
+
+- It has no load-job support, so `dbt seed` fails with `not support
+  sourceFormat`, and it returns incomplete job resources, so `dbt run` dies in
+  the adapter with `NoneType object has no attribute path`.
 - Python's `google-cloud-bigquery` does not honour `BIGQUERY_EMULATOR_HOST` the
-  way the Go client does, so pointing dbt-bigquery at an emulator needs the
-  endpoint injected into the client — the same monkeypatching trick as
-  `dbt_fakesnow.py`, in a `dbt_fakebq.py`.
+  way the Go client does, so the endpoint has to be injected into the client —
+  the same monkeypatching trick as `dbt_fakesnow.py`, kept in
+  `scripts/lib/dbt_fakebq.py` for when the emulator improves.
 - The catalog query joins `INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`, which the
   emulator may not implement. If it does not, `dbt run` would still yield a real
-  manifest and only the catalog would stay hand-built — which is still an
-  improvement on today.
+  manifest and only the catalog would stay hand-built.
 
 ## Postgres, in a container
 

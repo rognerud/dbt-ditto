@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
 # Rebuilds testdata/matrix/artifacts by running real dbt, once per version.
-#
-# The rig is split in two on purpose:
-#
-#   this script          needs Python, dbt and a warehouse. Run rarely.
-#   go test ./...        needs neither. Runs everywhere, on every commit.
-#
-# What crosses the line between them is a set of committed artifacts: the
-# manifest.json and catalog.json each dbt version writes. dbt-ditto reads
-# nothing else, so a captured pair is a complete, faithful record of what that
-# version looks like — and the Go suite can then hold every version at once
-# without anybody needing dbt installed.
+# Needs Python, uv, dbt and a warehouse; the Go tests that read the artifacts
+# need none of it. See testdata/matrix/README.md for why each row exists.
 #
 #   ./scripts/matrix.sh                        # every version in the matrix
 #   ./scripts/matrix.sh 1.9.8:1.9.3            # just this dbt-core:dbt-duckdb pair
@@ -32,31 +23,14 @@ mkdir -p "${TMPDIR}"
 # socket, most of all — has to have taken a copy first.
 REAL_HOME="${HOME}"
 
-# Entries are `dbt-core:dbt-duckdb`. Both are pinned, and that matters: an
-# adapter's requirement is only `dbt-core>=1.9,<2`, so installing dbt-duckdb 1.9
-# on its own happily resolves dbt-core 1.12. It is dbt-core's version that
-# decides the shape of the artifacts, so leaving it to the resolver would mean
-# the matrix silently tested the same thing several times.
-#
-# The chosen versions straddle the boundaries that change the artifacts:
-#
-#   1.8.x   before column-level `config:` existed at all
-#   1.9.0   column config exists, but below the 1.9.6 cutover
-#   1.9.8   past the cutover: meta belongs inside `config:`
-#   1.10.x  current stable
-#   1.12.x  latest
-# The Python version is pinned too, and has to be: uv installs the newest
-# interpreter it can by default, and dbt 1.8 and 1.9 do not run on 3.13 or 3.14
-# — they fail deep inside mashumaro at import time, which is a confusing way to
-# discover that the matrix row was never really tested.
+# Entries are `dbt-core:dbt-duckdb:python`. All three are pinned; testdata/matrix
+# /README.md explains why, and which artifact boundary each version straddles.
+# `local` captures the repository's own .venv without building an environment.
 VERSIONS=(
   "1.8.9:1.8.4:3.11"
   "1.9.0:1.9.0:3.11"
   "1.9.8:1.9.3:3.11"
   "1.10.11:1.10.1:3.12"
-  # `local` captures whatever the repository's own .venv pins, without building
-  # an environment. It covers the version the parity proof is written against,
-  # and rescues rows whose dependencies will not build here.
   "local"
 )
 if [[ $# -gt 0 ]]; then
@@ -190,13 +164,7 @@ PY
 done
 
 # --- Snowflake, with no Snowflake -------------------------------------------
-#
-# fakesnow replaces `snowflake.connector` with an implementation backed by
-# DuckDB, and dbt-snowflake talks to Snowflake through exactly that connector.
-# Patching it before dbt starts therefore gives a real dbt run — real adapter,
-# real macros, real `docs generate` — with no account, no credentials and no
-# network. The artifacts are genuinely Snowflake-shaped: upper-cased
-# identifiers, and NUMBER/TEXT/FLOAT types.
+# A real dbt-snowflake run against fakesnow: see scripts/lib/dbt_fakesnow.py.
 SNOWFLAKE=("1.10.11:1.10.2:3.12")
 if [[ -n "${SKIP_SNOWFLAKE:-}" ]]; then
   SNOWFLAKE=()
@@ -278,11 +246,7 @@ PY
 done
 
 # --- Postgres, in a container ------------------------------------------------
-#
-# dbt's reference adapter, with its own catalog query, its own type names
-# (`integer`, `character varying`) and real COMMENT ON support. It needs a
-# container, so it is skipped wherever Docker is not running rather than failing
-# the whole run.
+# Skipped rather than failed wherever Docker is not running.
 POSTGRES=("1.10.11:1.10.0:3.12")
 if [[ -n "${SKIP_POSTGRES:-}" ]]; then
   POSTGRES=()
@@ -422,20 +386,9 @@ PY
 done
 
 # --- BigQuery, from a parse rather than a run --------------------------------
-#
-# BigQuery has no usable local stand-in. bigquery-emulator gets far enough to
-# accept a connection but not to run dbt: it has no load-job support, so seeds
-# fail outright, and `dbt run` dies in the adapter with
-# `NoneType object has no attribute path` because the job resources it returns
-# are incomplete. scripts/lib/dbt_fakebq.py is kept for when that improves.
-#
-# `dbt parse` needs no warehouse at all, though, and it is dbt-bigquery that
-# writes the manifest. So the manifest here is genuinely the adapter own work
-# while the catalog is the hand-built one committed alongside the project. That
-# is an honest split, and it is recorded in meta.json.
-#
-# The deep BigQuery coverage -- nested RECORDs, ARRAY<STRUCT<...>>, policy tags
-# -- lives in testdata/bigquery, which is hand-built from the adapter source.
+# `dbt parse` needs no warehouse, so the manifest is genuinely dbt-bigquery's
+# work while the catalog is hand-built. meta.json records the split; see
+# testdata/matrix/README.md for why a run is not possible.
 BIGQUERY=("1.10.11:1.10.1:3.12")
 if [[ -n "${SKIP_BIGQUERY:-}" ]]; then
   BIGQUERY=()

@@ -45,9 +45,6 @@ build_project analytics
 echo
 echo "warehouse: ${DBT_DITTO_DB}"
 for p in platform analytics; do
-  # Counted by testing for each file rather than by counting `ls` output: there
-  # are exactly two artifacts worth reporting and naming them is clearer than
-  # parsing a listing.
   n=0
   for artifact in manifest catalog; do
     [[ -f "${FIXTURE}/${p}/target/${artifact}.json" ]] && n=$((n + 1))

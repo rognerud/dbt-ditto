@@ -31,30 +31,7 @@ repository (`.gocache/mod`), as is the build cache, so nothing depends on
 writable state elsewhere. The first build populates the cache and needs the
 network; later ones do not.
 
-## Repository layout
-
-```
-cmd/dbt-ditto/        the CLI
-internal/config/      dbt_ditto.yml, [tool.dbt-ditto] in pyproject.toml,
-                      dbt_loom.config.yml discovery, and the defaults that pin
-                      dbt-osmosis parity
-internal/dbt/         streaming manifest.json / catalog.json / dbt_project.yml readers
-internal/inherit/     the cross-project graph and the inheritance resolver
-internal/runner/      orchestration, selection, path templates, YAML writing
-internal/sources/     source providers: the contract, the subprocess, the cache,
-                      and label routing
-internal/yamlfile/    yaml.Node editing that preserves comments and key order
-internal/canon/       sorts the named entries in a schema file, so two trees can
-                      be compared without comparing dbt's node order
-internal/features/    the step definitions behind features/
-features/             behaviour specifications in Gherkin, run as tests
-testdata/projects/    the two-project DuckDB fixture
-testdata/golden/      recorded dbt-osmosis output, and dbt-ditto's own for the
-                      cross-project case
-packaging/providers/  the BigQuery and Snowflake source providers, in Python
-packaging/pypi/       the wheel builder that ships the binary
-scripts/              fixture build, parity harness, benchmark harness
-```
+The repository layout is in [AGENTS.md](../AGENTS.md#repository-layout).
 
 ## Proof that it matches dbt-osmosis
 
@@ -121,29 +98,21 @@ documentation propagated.
 ## dbt versions
 
 dbt-ditto is tested against five dbt versions, from 1.8.9 to 1.12.4, on every
-`go test` — with no dbt installed.
-
-That works because dbt-ditto reads `manifest.json` and `catalog.json` and
-nothing else, so a captured pair is a complete record of what a dbt version
-looks like. `make matrix` runs real dbt once per version in a throwaway
-environment and commits the artifacts; `make matrix-test` then replays all of
-them. The whole matrix is a few hundred kilobytes.
+`go test` — with no dbt installed. `make matrix` runs real dbt once per version
+in a throwaway environment and commits the artifacts; `make matrix-test` replays
+all of them.
 
 The versions straddle dbt 1.9.6, where column-level `config:` arrived — writing
 meta there on an older dbt loses it silently, so where meta goes is the most
-version-sensitive decision the tool makes, and it is asserted against every
-captured version rather than against a made-up version string. A test fails if
-the matrix ever stops spanning that boundary.
-
-Adding a version is one line in `scripts/matrix.sh`. See
+version-sensitive decision the tool makes, and a test fails if the matrix stops
+spanning that boundary. Adding a version is one line in `scripts/matrix.sh`; see
 [`testdata/matrix/README.md`](../testdata/matrix/README.md).
 
 ## Four adapters, no cloud accounts
 
-The matrix covers **DuckDB, Postgres, Snowflake and BigQuery**, and none of it
-needs a cloud account, credentials or billing. dbt-ditto never connects to a
-warehouse, so an adapter is exercised by the shape of the artifacts it writes —
-and each one can be obtained locally:
+The matrix covers **DuckDB, Postgres, Snowflake and BigQuery** with no cloud
+account, credentials or billing, because an adapter is exercised by the shape of
+the artifacts it writes:
 
 | Adapter | How the artifacts are produced | Fidelity |
 | --- | --- | --- |
@@ -153,29 +122,9 @@ and each one can be obtained locally:
 | BigQuery | manifest from `dbt parse`; catalog hand-built | real manifest, assembled catalog |
 
 `TestMatrixCoversEveryAdapter` fails if any of the four stops being captured.
-
-**Snowflake is a real dbt run.** [`fakesnow`](https://pypi.org/project/fakesnow/)
-replaces `snowflake.connector` with an implementation backed by DuckDB, and
-dbt-snowflake talks to Snowflake through exactly that connector. Patching it
-before dbt starts gives the real adapter, the real macros and a real
-`docs generate`, so the artifacts are generated rather than guessed. They come
-out genuinely Snowflake-shaped: `ORDER_ID` where the YAML says `order_id`, and
-`NUMBER`/`TEXT` rather than DuckDB's types. Bridging that case difference is the
-one thing DuckDB can never exercise.
-
-**BigQuery is a hand-built fixture**, since it has no in-process fake. Each
-detail in `testdata/bigquery` is traced back to the adapter's own source —
-`catalog.sql` for the artifact shape, `column.py` for the type text — rather
-than guessed, and it covers nested and repeated `RECORD` columns,
-`ARRAY<STRUCT<...>>`, `NUMERIC(38, 9)`, `GEOGRAPHY`, `JSON`, `policy_tags` and
-warehouse-set column descriptions.
-
-That fixture earned its keep immediately. BigQuery's catalog query joins through
-`INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`, so a nested record arrives as the
-parent column *and* every dotted leaf, where DuckDB reports only the parent —
-which means expanding struct types without checking writes every nested field
-twice on BigQuery. It also surfaced a key-ordering bug that no DuckDB test could
-have caught.
+How each is obtained, and what it cannot cover, is in
+[`testdata/matrix/README.md`](../testdata/matrix/README.md) and
+[`testdata/bigquery/README.md`](../testdata/bigquery/README.md).
 
 ## Source providers, tested without an account
 
@@ -210,20 +159,10 @@ them.
 
 ## Git hooks
 
-`make hooks` installs [lefthook](https://lefthook.dev). The split follows how
-much each check costs:
-
-- **pre-commit** (~3s): gofmt with the result staged back, `go vet`, the short
-  test suite, `shellcheck` and `bash -n` on shell, `py_compile` on Python, and a
-  guard that a matrix artifact is never committed uncompressed.
-- **pre-push** (~12s): the whole Go suite — every captured dbt version and all
-  four adapters, plus the recorded dbt-osmosis parity proof — then the race
-  detector and a build.
-
-Neither needs dbt, Docker or the network, which is what makes them safe to
-block on. Regenerating artifacts (`make matrix`) and the live dbt-osmosis
-comparison (`make parity`) are deliberately *not* hooks: they are slow, they
-reach the network, and they rewrite committed fixtures.
+`make hooks` installs [lefthook](https://lefthook.dev): pre-commit is the fast
+checks (~3s), pre-push the whole Go suite, race detector and build (~12s).
+Neither needs dbt, Docker or the network, which is what makes them safe to block
+on. The jobs are listed in [`lefthook.yml`](../lefthook.yml).
 
 ## Speed
 
@@ -249,21 +188,8 @@ Scaling on generated projects (`go test -bench`, one goroutine per core):
 | 5 000 models × 60 columns | 1.41 s | 1.23 s |
 
 At that size the run is dominated by opening files, not by anything dbt-ditto
-computes. What got it there:
-
-- The manifest is decoded as a **stream**, skipping `macros`, `child_map`,
-  compiled SQL and every other key that inheritance does not read, instead of
-  handing a hundred megabytes to reflection-based decoding.
-- Inheritance is resolved for every node **in parallel**, as is loading and
-  writing the YAML files; only the mutation step in between is serial, because
-  two models can share a file.
-- Column lookups go through a **folded index** built once per node, not a linear
-  scan per ancestor per column.
-- A document that a run leaves unchanged is recognised by **fingerprint** and
-  never serialised. This is the path CI takes on a healthy repository.
-- Column meta values are turned into YAML nodes **directly**; the obvious
-  `yaml.Node.Encode` stands up a whole emitter and parser per value, which alone
-  accounted for half of all allocations.
+computes. What got it there, and what must not regress, is in
+[AGENTS.md](../AGENTS.md#performance).
 
 ## CI
 

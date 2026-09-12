@@ -54,16 +54,10 @@ jobs:
       # taken back, so nothing is built until this passes.
       - run: ./scripts/check-versions.sh "${{ steps.tag.outputs.tag }}"
 
-      # Publishing the draft creates the tag at main's head, which is the commit
-      # *before* the bump above. Left alone, the tag would point at files
-      # claiming the previous version, and everything downstream that checks out
-      # the tag — the archives, the wheels — would disagree with it.
-      #
-      # So the tag is moved onto the bump commit. Force-moving a tag is
-      # ordinarily something to avoid, and it is safe here for one reason: this
-      # runs seconds after the tag was created and before anything has been
-      # built from it, so there is nothing published that could already have
-      # been fetched at the old position.
+      # The tag was created at main's head, the commit *before* the bump above,
+      # so it would otherwise point at files claiming the previous version.
+      # Force-moving it is safe only because this runs seconds after the tag was
+      # created and before anything has been built from it.
       - name: commit the bump and bring the tag with it
         env:
           TAG: ${{ steps.tag.outputs.tag }}

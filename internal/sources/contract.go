@@ -1,15 +1,7 @@
 // Package sources documents external sources — the raw tables no dbt project
-// builds — by asking an external program about them.
-//
-// A source is a root of the DAG, so inheritance can never reach it: there is
-// nothing upstream to inherit from. The warehouse does know about it, but
-// reaching the warehouse means an SDK, credentials and a network call, none of
-// which belong in a binary whose whole premise is reading artifacts off disk.
-//
-// So the work is delegated. dbt-ditto writes the sources it wants answers for
-// to a provider's stdin and reads documentation back from its stdout. The
-// binary keeps its two pure-Go dependencies, a provider can be written in any
-// language, and adding a warehouse needs no change here.
+// builds, which inheritance can never reach — by asking an external program
+// about them: dbt-ditto writes the sources it wants answers for to a provider's
+// stdin and reads documentation back from its stdout.
 //
 // See docs/source-providers.md for the design and the reasoning.
 package sources
@@ -28,20 +20,11 @@ type Request struct {
 }
 
 // RequestProject describes the dbt project a source belongs to, so a provider
-// can authenticate the way dbt already does rather than being configured a
-// second time.
-//
-// This is the whole point of passing it: a dbt shop has already told dbt how to
-// reach BigQuery or Snowflake, in profiles.yml, including the method, the
-// service account, the key path, the role and the warehouse. A provider that
-// asked for its own copy of that would be a second set of credentials to keep
-// in step, and the one that drifts is the one nobody is testing.
-//
-// Root, Profile and Target are everything needed to resolve a connection with
-// dbt's own machinery: `dbt.config.profile.Profile.render_from_args`, or
-// failing that profiles.yml read directly. ProfilesDir follows dbt's own
-// resolution — DBT_PROFILES_DIR, else the project directory, else ~/.dbt — so
-// a provider does not have to reimplement that either.
+// authenticates the way dbt already does rather than keeping a second copy of
+// the credentials. Root, Profile and Target are enough to resolve a connection
+// through `dbt.config.profile.Profile.render_from_args`, or failing that through
+// profiles.yml read directly. ProfilesDir follows dbt's own resolution:
+// DBT_PROFILES_DIR, else the project directory, else ~/.dbt.
 type RequestProject struct {
 	Name        string `json:"name"`
 	Root        string `json:"root"`

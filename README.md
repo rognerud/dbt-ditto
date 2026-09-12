@@ -28,15 +28,8 @@ flowchart LR
     DITTO -->|"ambiguity and directive warnings"| ERR["stderr"]
 ```
 
-## Status
-
-Active, pre-1.0.
-
-## Points of contact
-
-| | |
-|---|---|
-| Contact | [GitHub issues](https://github.com/rognerud/dbt-ditto/issues) |
+Active, pre-1.0. Support is best-effort via
+[GitHub issues](https://github.com/rognerud/dbt-ditto/issues).
 
 ## What it does
 
@@ -85,22 +78,18 @@ Anything beyond that goes in `dbt_ditto.yml` or a `[tool.dbt-ditto]` table in
 [docs/usage.md](docs/usage.md#settings) tables every key with its default, and
 [`internal/config/config.go`](internal/config/config.go) is the source of truth.
 
-## Observability
+## Output
 
-- Everything goes to the terminal: the summary and the list of files on stdout,
-  warnings on stderr. Nothing is shipped anywhere.
-- A run succeeded if it exits `0`; `--check` exits non-zero when documentation is
-  out of date, which is the signal CI should gate on.
-- No metrics. It is a short-lived command, so there is nothing to scrape — use
-  the exit code and the run output.
+The summary and the list of files go to stdout, warnings to stderr, and nothing
+is shipped anywhere. A run succeeded if it exits `0`; `--check` exits non-zero
+when documentation is out of date, which is what CI should gate on.
 
-## Scope of reuse
+## Install
 
-Meant to be used by any dbt project, not just this repository's own: it is
-published as a PyPI wheel carrying the binary (`uv add dbt-ditto`) and as a Go
-module. Configuration is read from `dbt_ditto.yml`, and from the
-`+dbt-osmosis:` rules a project already has. Support is best-effort via GitHub
-issues.
+```sh
+uv add dbt-ditto          # or pip install dbt-ditto — the wheel carries the binary
+go install github.com/rognerud/dbt-ditto/cmd/dbt-ditto@latest
+```
 
 ## More documentation
 

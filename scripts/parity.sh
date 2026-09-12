@@ -27,28 +27,20 @@ export DBT_DITTO_DB="${ROOT}/testdata/warehouse.duckdb"
 export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 mkdir -p "${TMPDIR}"
 
-# The two tools learn a column's type by different routes, and only one of them
-# reads a file that is in the repository. dbt-ditto reads the committed
-# target/catalog.json; dbt-osmosis asks the adapter, which means the fixture has
-# to exist as real tables in DuckDB. That file is generated and not committed,
-# so on a clean checkout — CI, every time — it is simply absent, and DuckDB
-# obligingly creates an empty database rather than failing. dbt-osmosis then
-# finds no columns anywhere and writes bare `- name: <model>` scaffolding, and
-# the diff reads as though dbt-ditto invented every column in the fixture.
+# dbt-osmosis asks the adapter for column types, so the fixture has to exist as
+# real tables in DuckDB. The warehouse is gitignored, so on a clean checkout
+# DuckDB creates an empty database instead of failing, dbt-osmosis finds no
+# columns and writes bare `- name: <model>` scaffolding, and the diff reads as
+# though dbt-ditto invented every column.
 if [[ ! -f "${DBT_DITTO_DB}" ]]; then
   echo "==> building the fixture warehouse"
   mkdir -p "${ROOT}/.gocache"
 
-  # Only the warehouse is wanted from this. build-fixture.sh also rewrites the
-  # committed target/manifest.json, and that must not survive, because dbt does
-  # not order the nodes in a manifest deterministically: two parses of the same
-  # project on the same machine can list two models in either order.
-  #
-  # It matters because selectNodes lays models out in manifest order, and when
-  # several share one schema file that order is visible in the bytes. The
-  # committed manifest is the one dbt-osmosis was recorded against, so keeping
-  # it is what makes the comparison a comparison, rather than a coin toss
-  # between two independent parses.
+  # Only the warehouse is wanted. build-fixture.sh also rewrites the committed
+  # target/manifest.json, which must not survive: dbt does not order manifest
+  # nodes deterministically, and selectNodes lays models out in manifest order,
+  # so that order is visible in the bytes wherever several share a schema file.
+  # The committed manifest is the one dbt-osmosis was recorded against.
   SAVED="$(mktemp -d "${TMPDIR%/}/parity-artifacts.XXXXXX")"
   for project in platform analytics; do
     cp -R "${ROOT}/testdata/projects/${project}/target" "${SAVED}/${project}"
@@ -97,29 +89,18 @@ echo "    exit code ${OSMOSIS_ANALYTICS_RC}"
 
 echo "==> dbt-ditto: both projects"
 # The fixture config lives outside the project tree, so point a copy of it at
-# the scratch copies.
-# Two settings are turned off so the comparison is like for like:
+# the scratch copies. Three settings are turned off so the comparison is like
+# for like:
 #
-#   output.comments: osmosis
-#     reproduces dbt-osmosis' loss of comments inside a column list, which
-#     dbt-ditto otherwise keeps.
+#   output.comments: osmosis     dbt-osmosis loses comments inside a column list
+#   columns.comments: never      the DuckDB adapter reports no COMMENTs, but
+#                                catalog.json carries them
+#   inheritance.progenitor: false  dbt-osmosis records no provenance
 #
-#   columns.comments: never
-#     stops dbt-ditto reading the warehouse's own column comments. Both tools
-#     use them, but by different routes: dbt-osmosis asks the adapter, and the
-#     DuckDB adapter does not report comments, while catalog.json does. On an
-#     adapter that reports them, such as Snowflake, the two agree.
-#
-#   inheritance.progenitor: false
-#     dbt-ditto records where each inherited description came from and
-#     dbt-osmosis does not, so the annotation is turned off to compare like for
-#     like. It is inserted into the existing `inheritance:` block rather than
-#     appended, since a second top-level `inheritance:` key would be a duplicate.
-#
-# The replacement text spans two lines, and BSD sed will not take a literal
-# newline in a `s###` replacement any other way than a backslash followed by
-# one. Building the whole expression with $'...' keeps that escape inside a
-# single quoting context, rather than stitching three of them together mid-word.
+# progenitor is inserted into the existing `inheritance:` block rather than
+# appended, since a second top-level key would be a duplicate. BSD sed only
+# takes a literal newline in a `s###` replacement as a backslash followed by
+# one, hence $'...' to keep that escape in one quoting context.
 progenitor_off=$'s#^inheritance:$#inheritance:\\\n  progenitor: false#'
 {
   sed -e 's#projects/#./#' -e "${progenitor_off}" "${ROOT}/testdata/dbt_ditto.yml"
@@ -133,16 +114,11 @@ GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}" GOMODCACHE="${GOMODCACHE:-${ROOT
 echo
 echo "==> diff (platform schema YAML)"
 # Both trees are copied and canonicalised first, so the diff does not depend on
-# the order dbt happened to list its nodes in. Entries sharing a schema file are
-# written in manifest order by both tools, but they learn that order by
-# different routes: dbt-osmosis parses the project on every run, while dbt-ditto
-# reads the committed target/manifest.json that the parse above was restored
-# over. dbt makes no promise about that order, so it differs by machine — on the
-# CI runner the platform seeds come out in the opposite order to the recorded
-# manifest — and comparing it asserts something neither tool claims. Entry order
-# within a file is proved separately, by the Go tests against the recorded
-# manifest. The copies keep the uncanonicalised output for the golden refresh
-# below.
+# manifest node order: dbt-osmosis re-parses the project on every run while
+# dbt-ditto reads the committed manifest, and dbt promises no order, so that
+# order differs by machine. Entry order within a file is proved separately, by
+# the Go tests against the recorded manifest. The copies keep the
+# uncanonicalised output for the golden refresh below.
 rm -rf "${WORK}/canon"
 mkdir -p "${WORK}/canon"
 cp -R "${WORK}/osmosis/platform" "${WORK}/canon/osmosis"

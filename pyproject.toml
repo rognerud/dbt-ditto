@@ -1,9 +1,15 @@
+# The local toolchain for `uv sync`, and the version string release.yml rewrites
+# from the tag (checked by scripts/check-versions.sh). The published wheels are
+# built by packaging/pypi/build_wheels.py and carry their own metadata; they
+# depend on nothing.
 [project]
 name = "dbt-ditto"
 version = "0.1.0"
-description = "Add your description here"
+description = "Propagates column documentation down the dbt graph"
 readme = "README.md"
 requires-python = ">=3.14"
+# Needed only to build the fixture and to run the real dbt-osmosis for the
+# parity proof.
 dependencies = [
     "dbt-duckdb>=1.11.0",
     "dbt-loom>=0.9.6",

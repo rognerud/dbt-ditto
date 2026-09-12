@@ -15,9 +15,8 @@ pip install dbt-ditto
 go install github.com/rognerud/dbt-ditto/cmd/dbt-ditto@latest
 ```
 
-The Python package contains the binary itself, not a wrapper: the installer
-drops it into the environment's `bin/`, so there is no interpreter startup on
-the way to the tool. Nothing else is pulled in — no dbt, no Python dependencies.
+The Python package contains the binary itself, not a wrapper, and pulls in
+nothing else — no dbt, no Python dependencies.
 
 ## Quick start
 
@@ -35,12 +34,11 @@ dbt-ditto inherit --check
 
 Configuration is searched for upwards from the working directory:
 `dbt_ditto.yml`, `dbt_ditto.yaml`, `.dbt_ditto.yml`, then `pyproject.toml` if it
-carries a `[tool.dbt-ditto]` table. A `pyproject.toml` without that table is
-skipped and the search continues upwards, so an unrelated packaging file never
-shadows a real config; one that cannot be parsed at all is skipped too, because
-someone else's broken TOML is not this tool's error to raise. `-c PATH` names a
-file directly, in either format, and a `pyproject.toml` named that way but
-missing the table is an error rather than a silent empty config.
+carries a `[tool.dbt-ditto]` table. A `pyproject.toml` without that table, or one
+that will not parse, is skipped and the search continues upwards, so an unrelated
+packaging file never shadows a real config. `-c PATH` names a file directly, in
+either format; a `pyproject.toml` named that way but missing the table is an
+error rather than a silent empty config.
 
 `dbt_ditto.yml`:
 
@@ -336,15 +334,10 @@ valueless labels and `owner:` is not a useful tag.
 
 ### What travels downstream
 
-Whether metadata follows the column keys off the level it sits at, which gets
-the right answer without anyone maintaining a list of keys.
-
-| | Travels? |
-|---|---|
-| The relation's own labels (owner, cost centre, Terraform stack) | **No.** They describe the physical object and are false the moment they are copied onto a model in another dataset. There is no setting; node meta is not inherited at all. |
-| A column's labels and policy tags | **Yes**, like a description. An access rule has no reason to change as the column moves between projects. |
-
-Among column labels, what the match preserved decides it:
+A relation's own labels (owner, cost centre, Terraform stack) never travel: they
+describe the physical object, and node meta is not inherited at all. A column's
+labels and policy tags do travel, like a description, and what the match
+preserved decides how far:
 
 ```yaml
 sources:
@@ -356,17 +349,12 @@ sources:
       on_conflict: warn   # warn | first | none
 ```
 
-An **aggregate** match is the interesting case. `avg_salary` still means salary,
-averaged, so the description carries — but the value the label classified no
-longer exists, so the label does not. It defaults to `warn` rather than `ignore`
-because silence is the dangerous answer: a missing description is visibly
-incomplete, while a missing classification reads as "this column is not
-restricted", which is a claim, and a false one.
-
-A **conflict** — two ancestors in one generation labelling a column differently
-— writes nothing and says so. Descriptions break that tie by lowest `unique_id`;
-for a choice between `restricted` and `public` that is not a decision this tool
-can make, and ranking restrictiveness needs an ordering it has no way to learn.
+An **aggregate** match is the interesting case: `avg_salary` still means salary,
+averaged, so the description carries, but the value the label classified no
+longer exists, so the label does not. A **conflict** — two ancestors in one
+generation labelling a column differently — writes nothing and says so. Both
+default to `warn` rather than to a silent guess; the reasoning is in
+[source-providers.md](source-providers.md#propagation).
 
 > dbt-ditto writing `policy_tag: pii/high` onto a downstream column does **not**
 > apply that policy tag in the warehouse. It records what upstream says, which
@@ -534,15 +522,14 @@ Every inherited description records its origin:
 ```
 
 An inherited description is the one line in a schema file nobody wrote, so
-leaving its origin out makes copied documentation indistinguishable from
-reviewed documentation. It is also the only way to see, in the file itself, that
-a description crossed a project boundary. dbt-osmosis leaves this off, so a
-project being compared against it byte for byte sets `inheritance.progenitor:
-false` — which is what `scripts/parity.sh` does. The key name is
-`inheritance.progenitor_key`.
+leaving its origin out makes copied documentation indistinguishable from reviewed
+documentation, and it is the only way to see in the file that a description
+crossed a project boundary. dbt-osmosis leaves this off, so a project compared
+against it byte for byte sets `inheritance.progenitor: false` — which is what
+`scripts/parity.sh` does. Rename the key with `inheritance.progenitor_key`.
 
 Only genuinely inherited descriptions get one: a column documented locally has
-no progenitor, and does not gain a meta key claiming otherwise.
+no progenitor.
 
 ## Following a column through a rename
 
@@ -578,14 +565,12 @@ Two rules keep it from doing damage:
   `max_order_count` does not reduce all the way to `order`.
 
 It is off by default, because it is a lexical heuristic and it changes output
-that dbt-osmosis would leave alone — the parity guarantee has to keep holding
-for projects that want it. It is also worth knowing what a heuristic buys: in
-the fixture, `count(order_id) as order_id_count` inherits *"Surrogate key for an
-order."*, which is the description of the thing being counted rather than of the
-count. Drop `count` from `inheritance.derived.suffixes` if that trade is not
-worth it for your project. Nothing here parses SQL, so a column renamed for
-semantic rather than lexical reasons — `lifetime_value_cents` from
-`amount_cents` — is still not matched.
+dbt-osmosis would leave alone. Know what the heuristic buys: in the fixture,
+`count(order_id) as order_id_count` inherits *"Surrogate key for an order."*,
+which describes the thing being counted rather than the count. Drop `count` from
+`inheritance.derived.suffixes` if that trade is not worth it. Nothing here parses
+SQL, so a column renamed for semantic rather than lexical reasons —
+`lifetime_value_cents` from `amount_cents` — is still not matched.
 
 Struct *expansion* is separate and on by default: adapters that understand
 nested data report `profile.first_name` as a column in its own right, so

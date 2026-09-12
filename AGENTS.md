@@ -126,12 +126,17 @@ is dbt-ditto's own output.
 
 ```
 cmd/dbt-ditto/        CLI
-internal/config/      dbt_ditto.yml / pyproject.toml + the defaults that pin parity
+internal/config/      dbt_ditto.yml / pyproject.toml / loom discovery + the
+                      defaults that pin parity
 internal/dbt/         streaming manifest reader, catalog, dbt_project.yml, OrderedMap
 internal/inherit/     cross-project graph (generations) + resolver
 internal/runner/      orchestration, selection, path templates, YAML writing
 internal/sources/     source providers: contract, subprocess, cache, label routing
 internal/yamlfile/    yaml.Node editing preserving comments and key order
+internal/canon/       sorts a schema file's named entries, so two trees compare
+                      without comparing dbt's node order
+internal/features/    step definitions behind features/
+features/             Gherkin behaviour specifications, run as tests
 packaging/providers/  the BigQuery and Snowflake providers, in Python
 packaging/pypi/       wheel builder carrying the binary
 testdata/projects/    platform (upstream) + analytics (downstream, via dbt-loom)
@@ -142,32 +147,19 @@ docs/                 usage, development and source-provider documentation
 
 ## Releasing
 
-A release is the act of publishing a draft. `draft-release.yml` runs
-[release-drafter](https://github.com/release-drafter/release-drafter) on every
-merge to `main` and keeps one draft up to date: notes from the pull requests
-merged since the last release, version resolved from their labels (`breaking` →
-major, `enhancement`/`removal` → minor, everything else including unlabelled →
-patch). Nothing is tagged until someone presses Publish, which is what creates
-the tag and starts `release.yml`.
+A release is the act of publishing the draft that
+[release-drafter](https://github.com/release-drafter/release-drafter) maintains
+on `main`. Nothing is tagged until someone presses Publish, which creates the tag
+and starts `release.yml`. The version comes from the merged PRs' labels, which is
+why they live in `.github/labels.yml` and are synced by `labeler.yml` rather than
+being created by hand. What each workflow runs is tabled in
+[docs/development.md](docs/development.md#ci).
 
-The labels are part of the machinery, so they live in `.github/labels.yml` and
-are synced by `labeler.yml`; created by hand they drift from the resolver that
-reads them.
-
-The tag is created at `main`'s head, before the version bump. `release.yml`
+The tag is created at `main`'s head, before the version bump, so `release.yml`
 rewrites `pyproject.toml` from the tag, commits that to `main`, then force-moves
-the tag onto the bump commit; otherwise the tag points at a file claiming the
-previous version and everything downstream disagrees with it. Moving a tag is
-acceptable only because it happens seconds after publication, before anything has
-been built from it.
-
-| | trigger | does |
-| --- | --- | --- |
-| `ci.yml` | push, PR | gofmt, vet, test on Linux and macOS, race, shellcheck, provider tests, live `parity.sh --check` |
-| `draft-release.yml` | push to `main`, PR labelled | release-drafter: updates the draft's notes and next version. Tags nothing |
-| `labeler.yml` | `.github/labels.yml` changes | syncs the labels release-drafter reads |
-| `release.yml` | draft release published | version bump + tag move, `dist.sh` archives, wheels, PyPI via trusted publishing, attaches assets |
-| `scripts/check-versions.sh` | called by `release.yml` | tag vs `pyproject.toml` vs the wheel's normalised version |
+the tag onto the bump commit. Otherwise the tag points at a file claiming the
+previous version. Moving a tag is acceptable only because it happens seconds
+after publication, before anything has been built from it.
 
 PyPI publishing is configured outside the repository: trusted publishing for
 `dbt-ditto` against workflow `release.yml` and environment `pypi`. No API token
@@ -177,11 +169,8 @@ never runs. Nothing else needs a secret.
 
 ## Performance
 
-`make bench`: 1.507 s for dbt-osmosis against 0.022 s for dbt-ditto on the
-fixture. Synthetic scaling: 5 000 models × 60 columns in about 1.4 s, at which
-point the run is bound by opening files.
-
-What must not regress:
+The numbers are in [docs/development.md](docs/development.md#speed). What must
+not regress:
 
 - Manifest decoding is a token stream that skips `macros`, `child_map`, compiled
   SQL and similar. It also records each node's position, which is the order
@@ -212,62 +201,23 @@ Go and runs on every commit. Everything crossing that line is committed.
 | dbt-osmosis parity | `scripts/parity.sh` | `testdata/golden/` | `golden_test.go` |
 | BigQuery (deep) | hand-built from adapter source | `testdata/bigquery/` | `bigquery_test.go` |
 
-Snowflake needs no account. `fakesnow` replaces `snowflake.connector` with a
-DuckDB-backed implementation, and dbt-snowflake talks to Snowflake through
-exactly that connector, so patching it before dbt starts
-(`scripts/lib/dbt_fakesnow.py`) produces a real dbt run: real adapter, real
-macros, real `docs generate`. The upper-cased identifiers and `NUMBER`/`TEXT`
-types in the artifacts are genuine rather than guessed. Two details: fakesnow's
-`db_path` is a directory, and `dbt docs generate` must be passed as two
-arguments.
+Why each row exists and what it cannot cover is in
+[`testdata/matrix/README.md`](testdata/matrix/README.md) and
+[`testdata/bigquery/README.md`](testdata/bigquery/README.md); the mechanics are
+in `scripts/matrix.sh`. What is not recorded there:
 
-BigQuery cannot be run locally. `bigquery-emulator` answers `datasets`, but has
-no load-job support (`dbt seed` fails with `not support sourceFormat`) and
-returns incomplete job resources (`dbt run` fails in the adapter with
-`NoneType object has no attribute path`). The matrix row therefore uses
-`dbt parse`, which needs no warehouse and is still dbt-bigquery writing the
-manifest; the catalog is the hand-built
-`testdata/matrix/bigquery/catalog.json`, and `meta.json` records both facts.
-`scripts/lib/dbt_fakebq.py` is kept for when the emulator improves: the Go
-BigQuery client honours `BIGQUERY_EMULATOR_HOST` and the Python one does not, so
-the endpoint has to be injected.
-
-Postgres needs Docker and skips without it. The row starts a throwaway
-`postgres:16-alpine` on port 55432 rather than 5432, so a local Postgres is never
-touched. On macOS that means `colima start`.
-
-Constraints encoded in `scripts/matrix.sh`:
-
-- Pinning the adapter does not pin dbt-core: `dbt-duckdb==1.9.0` resolves
-  dbt-core 1.12, because the requirement is only `dbt-core>=1.9,<2`. Entries are
-  `dbt-core:dbt-duckdb:python` and all three are pinned.
-- uv installs the newest Python available, and dbt 1.8 and 1.9 do not run on
-  3.13 or 3.14; they fail inside mashumaro at import time.
+- `trueColumns` skips expanding any path the catalog already names. BigQuery's
+  catalog macro reports a nested `RECORD` as the parent *and* every dotted leaf,
+  DuckDB reports only the parent, so without that BigQuery gets every nested
+  field twice.
+- Snowflake's `normalize_column_name` upper-cases; dbt-ditto does not.
+- fakesnow's `db_path` is a directory, and `dbt docs generate` must be passed as
+  two arguments.
 - dbt-core 1.12 pulls `dbt-core-experimental-parser`, whose build downloads a
-  47 MB binary. That fails behind a filtering proxy, so the `local` entry
-  captures the repository's own `.venv` instead.
+  47 MB binary. That fails behind a filtering proxy, hence the `local` entry
+  capturing the repository's own `.venv` instead.
 - macOS ships bash 3.2, where `"${ARR[@]}"` on an empty array is an error under
   `set -u`, hence the `${ARR[@]+"${ARR[@]}"}` idiom. `${#ARR[@]}` is fine.
-
-## Warehouses other than DuckDB
-
-Covering a warehouse means covering the shape of the artifacts its adapter
-writes, which needs no account: read the adapter's catalog macro and its `Column`
-class, then build a faithful `manifest.json` and `catalog.json` by hand.
-`testdata/bigquery` does this, and its README records which adapter file each
-detail came from.
-
-- BigQuery's catalog macro joins `INFORMATION_SCHEMA.COLUMNS` to
-  `COLUMN_FIELD_PATHS`, so a nested `RECORD` appears as the parent and every
-  dotted leaf. DuckDB reports only the parent, with the fields inside its
-  composite type. `trueColumns` therefore skips expanding any path the catalog
-  already names, or BigQuery gets every nested field twice.
-- `BigQueryColumn.flatten()` returns leaves only, so dbt-osmosis running against
-  BigQuery never writes a bare `profile` entry while a catalog-driven tool does.
-- BigQuery renders records as ``STRUCT<`field` TYPE, ...>`` and wraps `REPEATED`
-  in `ARRAY<...>`.
-
-Snowflake's `normalize_column_name` upper-cases, which dbt-ditto does not do.
 
 ## Known pitfalls
 

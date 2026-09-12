@@ -1,11 +1,8 @@
 name: labeler
 
-# Keeps the repository's labels matching .github/labels.yml.
-#
-# The labels are not decoration: release-drafter reads them to decide both the
-# section of the release notes a pull request lands in and how the version is
-# bumped. Creating them by hand in the web interface means they drift from the
-# resolver that depends on them, and a typo'd label silently becomes a patch.
+# Keeps the repository's labels matching .github/labels.yml. release-drafter
+# reads them for both the notes section and the version bump, so a label created
+# by hand drifts from the resolver that depends on it.
 
 on:
   push:

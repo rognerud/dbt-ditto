@@ -1,14 +1,7 @@
-# release-drafter keeps a draft release on `main` up to date: the next version
-# number, and the notes, both derived from the pull requests merged since the
-# last release.
-#
-# The draft is the running record of what would ship. Publishing it is what
-# creates the tag, and the tag is what triggers release.yml. Nothing is tagged
-# before that point, so `main` is always releasable and never accidentally
-# released.
-#
-# The version comes from the labels on the merged PRs — see version-resolver
-# below — so the only thing that has to be right at merge time is the label.
+# release-drafter keeps one draft release on `main` up to date: the next version
+# and the notes, both derived from the PRs merged since the last release.
+# Publishing the draft creates the tag, which triggers release.yml. Nothing is
+# tagged before that, so `main` is never accidentally released.
 
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"

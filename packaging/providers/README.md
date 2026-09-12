@@ -16,16 +16,10 @@ a policy tag. A provider fetches that.
 | `echo.py` | answers from a file — the shortest complete example, and what the Go test suite runs |
 | `dbt_ditto_provider.py` | shared: the contract, and profiles.yml resolution |
 
-## Why these are separate programs
-
-dbt-ditto is a single static binary with two pure-Go dependencies that connects
-to nothing. Bundling a warehouse SDK would cost all three properties, for a
-feature most projects do not use. So dbt-ditto writes a request to a provider's
-stdin and reads documentation from its stdout, and the provider can be written
-in whatever language the warehouse's SDK is best in — which, for a dbt shop, is
-Python they already have installed.
-
 Adding a warehouse means writing one of these. It needs no change to dbt-ditto.
+Why providers are separate programs, and how their output is merged, is in
+[docs/source-providers.md](../../docs/source-providers.md); configuring them is
+in [docs/usage.md](../../docs/usage.md#asking-the-warehouse-source-providers).
 
 ## Credentials come from dbt
 
@@ -42,44 +36,6 @@ that refreshes documentation needs the warehouse SDK but not dbt.
 `--target` picks the target, falling back to `$DBT_TARGET` and then to whatever
 the profile calls default. `$DBT_PROFILES_DIR` is honoured, as is a
 `profiles.yml` beside `dbt_project.yml`.
-
-## Using one
-
-```yaml
-# dbt_ditto.yml
-sources:
-  providers:
-    - command: "uv run --with google-cloud-bigquery packaging/providers/bigquery.py"
-      match: { database: "bq-*" }
-    - command: "uv run --with snowflake-connector-python packaging/providers/snowflake.py"
-      match: { database: "SNOWFLAKE_*" }
-```
-
-```sh
-dbt-ditto inherit --refresh-sources   # runs the providers, writes the cache
-dbt-ditto inherit                     # reads the cache, connects to nothing
-dbt-ditto inherit --check             # likewise, so CI needs no credentials
-```
-
-The split matters. Providers make network calls, and `--check` runs in CI where
-a flaky API must not fail a formatting check and the runner may hold no
-warehouse credentials at all. So a refresh is something a person asks for, and
-its answer is cached in `target/ditto-sources.json`. Commit it, or restore it
-from a CI artifact — either way the ordinary run spawns nothing.
-
-A provider that fails is a warning, not a failed run, unless `sources.strict`
-is set.
-
-## Cost
-
-Only external sources are asked about — tens of tables, not thousands. Loom
-upstreams arrive as models and are documented through the graph; a source
-backed by a seed is already known to dbt. Neither is ever sent to a provider.
-
-BigQuery's `tables.get` is free metadata: no query job, no `jobUser` role, and
-the calls run in parallel. Snowflake is one INFORMATION_SCHEMA query per schema.
-A refresh is a second or so, against minutes for `dbt docs generate`, which
-walks every relation in the project to reach the same handful.
 
 ## The contract
 

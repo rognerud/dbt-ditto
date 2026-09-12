@@ -1,36 +1,29 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv/
 
-# Go build output and caches
+# Go build output, caches, test binaries and profiles
 /bin/
 /dist/
 /.gocache/
-
-# Go test binaries (`go test -c`, `go test -o`) and profile output
+/vendor/
 *.test
 *.out
 *.prof
 coverage.txt
 
-# Dependencies are resolved from the module cache against go.sum, not vendored.
-# A local `go mod vendor` is somebody's own business and is not committed.
-/vendor/
-
-# dbt run state (the parsed artifacts under testdata/*/target are committed on
-# purpose: the tests read them)
-testdata/projects/*/logs/
-testdata/projects/*/target/partial_parse.msgpack
-testdata/projects/*/target/graph*.gpickle
-testdata/projects/*/target/index.html
+# dbt run state. Only manifest.json and catalog.json under testdata/*/target are
+# committed; the tests read nothing else dbt writes there.
 .dbt/
+testdata/projects/*/logs/
+testdata/projects/*/target/*
+!testdata/projects/*/target/manifest.json
+!testdata/projects/*/target/catalog.json
 
 # Generated fixture warehouse (scripts/build-fixture.sh rebuilds it)
 testdata/warehouse.duckdb
@@ -41,8 +34,6 @@ testdata/warehouse.duckdb
 .vscode/
 *.swp
 
-# Local agent/tool state
+# Local agent/tool state and private notes
 .claude/
-
-# Private working notes and development state, not published with the repo
 .agents/

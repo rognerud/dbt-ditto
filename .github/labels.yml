@@ -1,11 +1,9 @@
-# The labels release-drafter reads. A pull request's label decides both which
-# section of the notes it lands in and how the version is bumped, so these are
-# part of the release machinery rather than decoration — which is why they are
-# in the repository and synced by labeler.yml instead of being created by hand
-# in the web interface and drifting.
+# The labels release-drafter reads: a PR's label decides both the section of the
+# notes it lands in and the version bump, so they are synced by labeler.yml
+# rather than created by hand and left to drift.
 #
-# The three that move the version are `breaking` (major), `enhancement` and
-# `removal` (minor). Everything else is a patch, as is a PR with no label at all.
+# `breaking` is a major bump, `enhancement` and `removal` minor. Everything else,
+# including an unlabelled PR, is a patch.
 
 - name: breaking
   color: "b60205"

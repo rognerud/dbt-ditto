@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The whole Go suite needs no dbt, no Python and no warehouse — that is the
-  # design — so it runs on both platforms the binary is used on.
+  # The Go suite needs no dbt, no Python and no warehouse, so it runs on both
+  # platforms the binary ships for.
   go:
     strategy:
       fail-fast: false
@@ -43,10 +43,8 @@ jobs:
       - run: go test ./...
       - run: go build -o bin/dbt-ditto ./cmd/dbt-ditto
 
-  # The behaviour specifications in features/, run as tests. They are the same
-  # promises the Go tests pin down, stated in the language an analyst would use,
-  # and they get their own job so a failure reads as "this behaviour changed"
-  # rather than being one line in the middle of the suite.
+  # Its own job so a failure reads as "this behaviour changed" rather than as one
+  # line in the middle of the suite.
   features:
     runs-on: ubuntu-latest
     steps:
@@ -76,11 +74,9 @@ jobs:
       - name: python syntax
         run: python3 -m compileall -q packaging scripts
 
-  # The source providers are Python, so their own logic needs a Python job.
-  # Neither BigQuery nor Snowflake is reached: this covers the contract,
-  # profiles.yml resolution and the type rendering that has to match each dbt
-  # adapter. That dbt-ditto and a provider agree about the wire format is proved
-  # in Go, by TestPythonProviderRoundTrip, in the job above.
+  # The providers are Python. No warehouse is reached: this covers the contract,
+  # profiles.yml resolution and adapter type rendering. That dbt-ditto and a
+  # provider agree about the wire format is proved in Go, above.
   providers:
     runs-on: ubuntu-latest
     steps:
@@ -91,9 +87,8 @@ jobs:
       - run: uv sync
       - run: ./scripts/providers.sh
 
-  # The parity proof, run for real: dbt-osmosis against dbt-ditto over the
-  # DuckDB fixture. `go test` replays the recorded result, but only this catches
-  # dbt-osmosis itself changing under us.
+  # The real dbt-osmosis against dbt-ditto. `go test` replays the recorded
+  # result; only this catches dbt-osmosis changing under us.
   parity:
     runs-on: ubuntu-latest
     steps:

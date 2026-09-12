@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# Runs the source providers' offline tests.
-#
-# Neither BigQuery nor Snowflake can be reached from a test run, and neither
-# needs to be: what is checked here is the part that breaks silently — the
-# contract, profiles.yml resolution, and the type rendering that has to agree
-# with what each dbt adapter writes into catalog.json.
-#
-# That dbt-ditto and a provider agree about the wire format is proved in Go, by
-# TestPythonProviderRoundTrip, which runs packaging/providers/echo.py through
-# the real pipeline on every `go test`.
+# Runs the source providers' offline tests: the contract, profiles.yml
+# resolution, and the type rendering that has to agree with what each dbt adapter
+# writes into catalog.json. No warehouse is reached. That dbt-ditto and a
+# provider agree about the wire format is proved in Go, by
+# TestPythonProviderRoundTrip.
 #
 #   ./scripts/providers.sh
 
