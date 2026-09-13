@@ -30,6 +30,15 @@ pre-commit:
       glob: "*.go"
       run: go test -short ./internal/...
 
+    # The ```gherkin blocks in docs/ are the test suite for what the prose
+    # claims. The job above already runs them — `glob` only filters a job whose
+    # command takes {staged_files}, so `go test ./internal/...` runs on every
+    # commit whatever was staged. This job adds nothing but a name, which is the
+    # point: "documentation is true ✗" says what broke, where a failure buried in
+    # ./internal/... does not.
+    - name: documentation is true
+      run: go test -count=1 ./internal/features/ -run 'TestDocumentationIsTrue|TestExecutableBlocksAreFolded'
+
     - name: shellcheck
       glob: "*.sh"
       # Skipped where shellcheck is not installed: a missing linter must not block.
@@ -76,3 +85,26 @@ pre-push:
 
     - name: build
       run: go build ./...
+
+    # Both take tens of seconds, which is too slow for pre-commit but cheap
+    # against a push. Skipped rather than failed when not installed: `make tools`
+    # fetches them, and a missing linter must not block a push.
+    - name: lint
+      run: |
+        if [ -x .gocache/tools/golangci-lint ]; then
+          .gocache/tools/golangci-lint run ./...
+        elif command -v golangci-lint >/dev/null 2>&1; then
+          golangci-lint run ./...
+        else
+          echo "golangci-lint not installed, skipping (make tools)"
+        fi
+
+    - name: vulnerabilities
+      run: |
+        if [ -x .gocache/tools/govulncheck ]; then
+          .gocache/tools/govulncheck ./...
+        elif command -v govulncheck >/dev/null 2>&1; then
+          govulncheck ./...
+        else
+          echo "govulncheck not installed, skipping (make tools)"
+        fi

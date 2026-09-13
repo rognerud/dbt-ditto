@@ -168,7 +168,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 					rep.Changes = append(rep.Changes, Change{
 						Node:   p.node.UniqueID,
 						File:   p.to,
-						Detail: fmt.Sprintf("moved from %s", p.from),
+						Detail: "moved from " + p.from,
 					})
 				}
 			}

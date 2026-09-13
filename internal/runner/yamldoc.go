@@ -106,13 +106,13 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 
 	if doc.SetDescription {
 		yamlfile.MapSet(entry, "description", yamlfile.Scalar(doc.Description))
-		changes = append(changes, fmt.Sprintf("description inherited from %s", doc.DescriptionFrom))
+		changes = append(changes, "description inherited from "+doc.DescriptionFrom)
 	}
 	if len(doc.Meta) > 0 {
 		// Node-level meta keeps the top-level shape: dbt-osmosis only moves *column*
 		// meta into a config block.
 		setMeta(entry, doc.Meta, false)
-		changes = append(changes, fmt.Sprintf("meta = %s", metaKeys(doc.Meta)))
+		changes = append(changes, "meta = "+metaKeys(doc.Meta))
 	}
 
 	if !opts.cfg.InheritColumns {
@@ -140,7 +140,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 		if node == nil {
 			node = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 			yamlfile.MapSet(node, "name", yamlfile.Scalar(cd.Name))
-			changes = append(changes, fmt.Sprintf("+ column %s", cd.Name))
+			changes = append(changes, "+ column "+cd.Name)
 		}
 		kept[key] = true
 
@@ -151,7 +151,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 			if cd.Progenitor != "" {
 				changes = append(changes, fmt.Sprintf("%s.description inherited from %s", cd.Name, cd.Progenitor))
 			} else {
-				changes = append(changes, fmt.Sprintf("%s.description written", cd.Name))
+				changes = append(changes, cd.Name+".description written")
 			}
 		} else if yamlfile.StringOf(yamlfile.MapGet(node, "description")) == "" {
 			// An empty description is noise; dbt-osmosis does not write one.
@@ -184,7 +184,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 			continue
 		}
 		if dropped[key] {
-			changes = append(changes, fmt.Sprintf("- column %s", columnName(c)))
+			changes = append(changes, "- column "+columnName(c))
 			continue
 		}
 		newSeq.Content = append(newSeq.Content, c)

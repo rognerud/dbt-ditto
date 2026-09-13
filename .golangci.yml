@@ -1,0 +1,132 @@
+# Static analysis. Run with `make lint`, and in the `lint` job of ci.yml.
+#
+# The set below is the standard linters plus the ones that catch a class of bug
+# this tool can actually have: it reads untrusted JSON, writes files in place and
+# runs work in parallel. Style linters that only argue about formatting are left
+# out — gofmt already settles that.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+issues:
+  # Report everything. The defaults hide all but the first few of each kind,
+  # which makes a clean run and a nearly clean run look the same.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - asasalint # a slice passed to a variadic any parameter, almost always a bug
+    - asciicheck # a non-ASCII identifier that looks like an ASCII one
+    - bidichk # bidirectional unicode that renders as something other than it is
+    - bodyclose # a leaked HTTP response body; the source providers make requests
+    - contextcheck # a context dropped on the way down a call chain
+    - durationcheck # a duration multiplied by a duration
+    - errorlint # a wrapped error compared with == instead of errors.Is
+    - errname # error types and sentinels named as the convention expects
+    - gocheckcompilerdirectives # a //go: directive the compiler silently ignores
+    - gocritic # a broad set of correctness and performance diagnostics
+    - gosec # security-relevant patterns; see the exclusions below
+    - makezero # make([]T, n) then append, which silently prepends n zero values
+    - misspell
+    - nilerr # returning nil after checking that err != nil
+    - nilnil # returning (nil, nil) from a function whose caller must choose
+    - noctx # an HTTP request made without a context
+    - perfsprint # fmt.Sprintf where a cheaper conversion exists
+    - predeclared # shadowing a predeclared identifier such as `len` or `new`
+    - reassign # reassigning a variable from another package
+    - unconvert # a conversion that does nothing
+    - unparam # a parameter or result nothing ever varies or reads
+    - usestdlibvars # a hardcoded string where the standard library names it
+    - wastedassign
+
+  settings:
+    errcheck:
+      # A failed write to stderr cannot be reported anywhere, and a deferred
+      # Close on a file only ever read from has nothing to report either.
+      exclude-functions:
+        - fmt.Fprintln(os.Stderr)
+        - fmt.Fprintf(os.Stderr)
+
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment reorders struct fields for packing. The structs here
+        # mirror the shape of dbt's JSON, which is worth more than the bytes.
+        - fieldalignment
+        # `if err := f(); err != nil` shadows an outer err by design, and is the
+        # spelling that keeps the error scoped to the branch that handles it.
+        - shadow
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        # Both argue for rewriting if/else chains as switches in places where the
+        # chain reads as the condition it is.
+        - ifElseChain
+        - singleCaseSwitch
+        # Naming a struct literal's fields is not worth it for a two-field
+        # internal type constructed once.
+        - unnamedResult
+        # config.Resolved and friends are settled settings, passed by value so a
+        # callee cannot alter what the run was configured with. That is the point
+        # of them, and it is worth more than the copy.
+        - hugeParam
+        - rangeValCopy
+
+    gosec:
+      excludes:
+        # G104 duplicates errcheck.
+        - G104
+        # G301: a schema directory is source, and is created 0755 alongside the
+        # rest of the project it belongs to.
+        - G301
+        # G304, G703: opening the file path the user named is this tool's job.
+        - G304
+        - G703
+        # G306: schema YAML is source, and is written 0644 like the rest of it.
+        - G306
+
+    misspell:
+      # No locale. The prose is British, but dbt's own vocabulary is American —
+      # `materialized` is a config key, not a spelling choice — so only genuine
+      # typos are worth reporting.
+      locale: ""
+
+    staticcheck:
+      checks:
+        - all
+        # QF1001 rewrites `!(a && b)` by De Morgan's law. The negated form is
+        # the one that reads as the thing being asserted.
+        - -QF1001
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Tests construct deliberately malformed input and ignore results that are
+      # not what they assert on. They also shell out to the built binary, which
+      # needs no context: the test framework already owns the timeout.
+      - path: _test\.go$
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - gocritic
+          - noctx
+          # perfsprint is about allocation in hot paths. A test's error message
+          # is neither, and fmt.Errorf keeps the messages written the same way.
+          - perfsprint
+
+formatters:
+  enable:
+    - gofmt

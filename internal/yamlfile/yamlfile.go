@@ -124,7 +124,9 @@ func hashString(h *uint64, s string) {
 
 func hashUint(h *uint64, v uint64) {
 	for i := 0; i < 8; i++ {
-		hashByte(h, byte(v>>(8*i)))
+		// Taking one byte at a time: the mask says so, rather than leaving the
+		// truncation to the conversion.
+		hashByte(h, byte((v>>(8*i))&0xff))
 	}
 }
 

@@ -92,8 +92,8 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 		for i := range res.resp.Sources {
 			d := res.resp.Sources[i]
 			if !set.add(&d) && d.UniqueID != "" {
-				set.Warnings = append(set.Warnings, fmt.Sprintf(
-					"%s: answered by more than one provider; kept the first", d.UniqueID))
+				set.Warnings = append(set.Warnings,
+					d.UniqueID+": answered by more than one provider; kept the first")
 			}
 		}
 	}

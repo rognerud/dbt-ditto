@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -185,7 +186,7 @@ func run(args []string) error {
 	// --check should do: the point of the cache is that CI reads it rather than
 	// dialling out. Asking for both is a mistake worth naming.
 	if opts.RefreshSources && opts.Check {
-		return fmt.Errorf("--refresh-sources and --check are contradictory: --check must not reach the warehouse; refresh first, then check")
+		return errors.New("--refresh-sources and --check are contradictory: --check must not reach the warehouse; refresh first, then check")
 	}
 
 	opts.DryRun = opts.DryRun || opts.Check
@@ -236,7 +237,7 @@ func run(args []string) error {
 	}
 
 	if opts.Check && (len(rep.FilesWritten) > 0 || len(rep.FilesDeleted) > 0) {
-		return fmt.Errorf("documentation is out of date")
+		return errors.New("documentation is out of date")
 	}
 	return nil
 }

@@ -7,7 +7,8 @@ Every ```gherkin block below is executed on every `go test`, against the real
 binary, by `TestDocumentationIsTrue`
 ([`internal/features/docs_test.go`](../internal/features/docs_test.go)). The
 blocks are the test suite — there is no second copy — so a sentence here whose
-block stopped passing fails the build.
+block stopped passing fails the build. They are folded away by default: open one
+to read the proof of the sentence above it.
 
 ## Install
 
@@ -30,6 +31,9 @@ Step 3 reads those artifacts from `target/` and never touches the warehouse.
 Given a project directory it needs no config file: the `+dbt-osmosis:` /
 `+dbt-ditto-path:` rules in `dbt_project.yml` are used.
 
+<details>
+<summary>A project directory is the whole invocation</summary>
+
 ```gherkin
 Scenario: a project directory is the whole invocation
   Given a dbt project
@@ -44,6 +48,8 @@ Scenario: a project directory is the whole invocation
     """
 ```
 
+</details>
+
 | Command | What it does |
 | --- | --- |
 | `dbt-ditto inherit ./project` | one project, no config file |
@@ -56,6 +62,9 @@ Scenario: a project directory is the whole invocation
 flags: `-c PATH`, `--no-organize`, `--refresh-sources`, `--target NAME`
 (`dbt-ditto --help` lists all). Files written and the summary go to stdout,
 warnings to stderr. Exit `0` means success.
+
+<details>
+<summary>--check is a gate, not an edit (+3 more)</summary>
 
 ```gherkin
 Scenario: --check is a gate, not an edit
@@ -102,6 +111,8 @@ Scenario: --select limits the run to the nodes named
   And the file "models/_dim_orders.yml" does not contain "description:"
 ```
 
+</details>
+
 ## The config file
 
 Needed only for more than one project, or to change a default. Searched upwards
@@ -125,6 +136,9 @@ reader, so they cannot drift.
 Projects are not named here: the name in `dbt_project.yml` or the manifest
 decides which nodes belong to which project. Relative paths resolve against the
 config file.
+
+<details>
+<summary>The config file is found by searching upwards, and its paths are its own (+3 more)</summary>
 
 ```gherkin
 Scenario: the config file is found by searching upwards, and its paths are its own
@@ -198,6 +212,8 @@ Scenario: -c names a config file directly
     """
 ```
 
+</details>
+
 ## Inheriting across projects
 
 Loom's job at dbt runtime is untouched: dbt-ditto has no dbt plugin and fetches
@@ -213,6 +229,9 @@ nothing. Three ways an upstream reaches the graph:
 
 The manifests then form one graph. Only models marked `access: public` are
 eligible, as in dbt. Upstream projects donate metadata and are never written to.
+
+<details>
+<summary>A model inherits from a model in another repository (+3 more)</summary>
 
 ```gherkin
 Scenario: a model inherits from a model in another repository
@@ -292,6 +311,8 @@ Scenario: a remote dbt-loom backend is reported rather than fetched
     """
 ```
 
+</details>
+
 ## Documenting source tables
 
 Inheritance runs downhill, so a source can never inherit. Three routes reach it,
@@ -301,6 +322,9 @@ and they compose:
 becomes the description. On by default for columns being added;
 `columns.comments: always` also fills columns already listed but undocumented,
 `never` ignores them.
+
+<details>
+<summary>A column added from the warehouse arrives with its COMMENT (+1 more)</summary>
 
 ```gherkin
 Scenario: a column added from the warehouse arrives with its COMMENT
@@ -364,6 +388,8 @@ Scenario: columns.comments always reaches a column already listed
     """
 ```
 
+</details>
+
 **2. Backfill from downstream**, from the staging model that reads the source:
 
 ```yaml
@@ -377,6 +403,9 @@ Descendants are searched nearest-first, through models that select the column
 undocumented. It only fills blanks, the source's own warehouse comment wins, and
 only sources are backfilled by default — otherwise a mart's wording flows
 backwards into everything feeding it.
+
+<details>
+<summary>A source takes the wording of the model below it (+1 more)</summary>
 
 ```gherkin
 Scenario: a source takes the wording of the model below it
@@ -460,6 +489,8 @@ Scenario: a model is not backfilled unless sources_only is off
   And the file "models/_stg_orders.yml" does not contain "Whatever the clerk typed in."
 ```
 
+</details>
+
 **3. Source providers** ask the warehouse directly. See
 [source-providers.md](source-providers.md).
 
@@ -482,6 +513,9 @@ deleting it would lose your instruction.
 Syntax is [dbt-doc-inherit's](https://github.com/tripleaceme/dbt-doc-inherit).
 Change the marker with `inheritance.directive_prefix`; turn it off with
 `inheritance.directives: false`.
+
+<details>
+<summary>A directive follows a renamed column (+1 more)</summary>
 
 ```gherkin
 Scenario: a directive follows a renamed column
@@ -541,11 +575,16 @@ Scenario: a directive naming nothing is reported and left where it is
     """
 ```
 
+</details>
+
 ## When two parents disagree
 
 Within a generation the first ancestor by `unique_id` claims the column, so a
 disagreement is settled alphabetically. That is arbitrary, so it is reported on
 stderr:
+
+<details>
+<summary>A disagreement is settled by unique_id, and said out loud</summary>
 
 ```gherkin
 Scenario: a disagreement is settled by unique_id, and said out loud
@@ -576,10 +615,15 @@ Scenario: a disagreement is settled by unique_id, and said out loud
     """
 ```
 
+</details>
+
 Warnings go to stderr, never fail the run, and never change what is written. A
 nearer generation overriding a further one is normal and is not reported. Silence
 them with `inheritance.warn_ambiguous: false`, or record them in the file with
 `inheritance.ambiguity_meta`:
+
+<details>
+<summary>The disagreement can be written down instead of only reported</summary>
 
 ```gherkin
 Scenario: the disagreement can be written down instead of only reported
@@ -618,6 +662,8 @@ Scenario: the disagreement can be written down instead of only reported
     """
 ```
 
+</details>
+
 Only inherited descriptions are annotated; documenting the column yourself
 removes it next run. `osmosis_progenitor` is written for every inherited
 description, the one line in a schema file nobody wrote; set
@@ -639,6 +685,9 @@ columns:
 Every column named `customer_id` in the run then says that: models below, the
 seed above, the source it came from, the same column in other projects. A
 decision has no direction.
+
+<details>
+<summary>A decision outranks the DAG, upwards as well as downwards (+1 more)</summary>
 
 ```gherkin
 Scenario: a decision outranks the DAG, upwards as well as downwards
@@ -707,6 +756,8 @@ Scenario: two decisions that disagree stop the run
     """
 ```
 
+</details>
+
 The rules:
 
 - It outranks name matching, a directive, `force`, and hand-written prose.
@@ -743,6 +794,9 @@ not read as an aggregate of `erparty_id`. Nothing here parses SQL, so it is off
 by default — `count(order_id) as order_id_count` inherits *"Surrogate key for an
 order."*, describing the thing counted rather than the count. Drop `count` from
 `inheritance.derived.suffixes` if that is a bad trade.
+
+<details>
+<summary>An aggregate keeps the documentation of what it aggregates (+2 more)</summary>
 
 ```gherkin
 Scenario: an aggregate keeps the documentation of what it aggregates
@@ -800,9 +854,14 @@ Scenario: only whole words are stripped, so an unrelated name is left alone
   And the file "models/_stg_parties.yml" does not contain "Nothing to do with a counterparty."
 ```
 
+</details>
+
 Struct *expansion* is separate and on by default: a `STRUCT` in `catalog.json` is
 parsed so `profile.first_name` is documented as its own column, which is what
 nested-data adapters report.
+
+<details>
+<summary>A struct in the catalog becomes one column per field</summary>
 
 ```gherkin
 Scenario: a struct in the catalog becomes one column per field
@@ -830,6 +889,8 @@ Scenario: a struct in the catalog becomes one column per field
     """
 ```
 
+</details>
+
 ## How inheritance resolves
 
 For each column, in the order dbt-osmosis does it:
@@ -844,6 +905,9 @@ For each column, in the order dbt-osmosis does it:
 4. A placeholder description upstream never overwrites anything.
 5. The description is applied only if the column has none of its own. Meta and
    tags are always merged, upstream winning collisions, local key order kept.
+
+<details>
+<summary>The nearer ancestor wins, and a local description wins over both (+1 more)</summary>
 
 ```gherkin
 Scenario: the nearer ancestor wins, and a local description wins over both
@@ -907,6 +971,8 @@ Scenario: a placeholder upstream is not an answer
   And the file "models/_stg_orders.yml" does not contain "Not documented"
 ```
 
+</details>
+
 Generations come from a depth-first walk, so a node reachable by several routes
 is filed under the depth first reached, not its shortest path — as in
 dbt-osmosis, and that is what decides conflicts.
@@ -921,6 +987,9 @@ dbt-osmosis, and that is what decides conflicts.
 | Snapshots are followed when walking ancestors | — |
 
 `backfill`, `derived` and `ambiguity_meta` diverge too, but default off.
+
+<details>
+<summary>Provenance is written by default and can be switched off (+2 more)</summary>
 
 ```gherkin
 Scenario: provenance is written by default and can be switched off
@@ -976,3 +1045,5 @@ Scenario: a comment in a column list survives the rewrite
     - name: order_note
     """
 ```
+
+</details>

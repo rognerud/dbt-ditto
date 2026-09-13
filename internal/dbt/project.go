@@ -171,7 +171,7 @@ func collectPathRules(section map[string]any, prefix []string, out *[]pathRule) 
 		}
 	}
 	for k, v := range section {
-		if len(k) > 0 && k[0] == '+' {
+		if k != "" && k[0] == '+' {
 			continue
 		}
 		child, ok := v.(map[string]any)

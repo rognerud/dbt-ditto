@@ -56,6 +56,35 @@ func TestDocumentationIsTrue(t *testing.T) {
 	}
 }
 
+// TestExecutableBlocksAreFolded keeps the scenarios collapsed. They are the test
+// suite and they are long, so a reader of the prose should meet a one-line
+// summary and open it only when they want the proof. Folding is the default, and
+// this is what makes it stay the default.
+func TestExecutableBlocksAreFolded(t *testing.T) {
+	for _, doc := range executableDocs {
+		raw, err := os.ReadFile(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(raw), "\n")
+		for i, line := range lines {
+			if strings.TrimSpace(line) != "```gherkin" {
+				continue
+			}
+			// <details>, <summary>…</summary>, then a blank line GitHub needs
+			// before the fence renders.
+			if i < 3 ||
+				strings.TrimSpace(lines[i-1]) != "" ||
+				!strings.HasPrefix(strings.TrimSpace(lines[i-2]), "<summary>") ||
+				strings.TrimSpace(lines[i-3]) != "<details>" {
+				t.Errorf("%s:%d: this ```gherkin block is not folded; wrap it in\n"+
+					"<details>\n<summary>What it proves</summary>\n\n```gherkin\n…\n```\n\n</details>",
+					doc, i+1)
+			}
+		}
+	}
+}
+
 // block is one fenced Gherkin block and the heading it was written under, which
 // is what makes a failure point back at a place in the documentation.
 type block struct {

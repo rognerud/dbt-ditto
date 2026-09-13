@@ -6,6 +6,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,7 +150,7 @@ func (w *world) aProject() error {
 // meta without a table per key.
 func columns(tbl *godog.Table) (map[string]any, error) {
 	if len(tbl.Rows) == 0 {
-		return nil, fmt.Errorf("the column table is empty")
+		return nil, errors.New("the column table is empty")
 	}
 	head := make([]string, 0, len(tbl.Rows[0].Cells))
 	for _, c := range tbl.Rows[0].Cells {

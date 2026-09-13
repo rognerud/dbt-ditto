@@ -43,6 +43,89 @@ jobs:
       - run: go test ./...
       - run: go build -o bin/dbt-ditto ./cmd/dbt-ditto
 
+  # Static analysis beyond `go vet`. The linter set and every exclusion is in
+  # .golangci.yml, next to the reason for it.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+
+  # Known vulnerabilities, from two directions: govulncheck asks whether this
+  # code reaches a vulnerable symbol, Trivy asks what the dependency manifests
+  # declare. They disagree usefully — a module can be vulnerable and unreachable.
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # Covers uv.lock as well, which govulncheck cannot see: the source
+      # providers are Python.
+      - name: trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: .gocache,.venv,dist,bin,testdata
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2
+
+  # The module graph has to be exactly what the source needs, and the checksums
+  # have to match what was resolved. Both are silent until someone looks.
+  modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go mod tidy leaves no diff
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go.mod / go.sum are not tidy; run 'go mod tidy'" >&2
+            exit 1
+          fi
+
+      - name: go mod verify
+        run: go mod verify
+
+  # A workflow only proves itself when it runs, which for a typo in a rarely
+  # taken branch can be months later.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          actionlint
+
   # Its own job so a failure reads as "this behaviour changed" rather than as one
   # line in the middle of the suite.
   features:
@@ -53,7 +136,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./internal/features/ -v
+
+      # The ```gherkin blocks in docs/ are the only copy of what the prose
+      # promises. Run first and named, so "the documentation stopped being true"
+      # is a line in the job list rather than something to go looking for.
+      - name: documentation is true
+        run: go test ./internal/features/ -run 'TestDocumentationIsTrue|TestExecutableBlocksAreFolded' -v
+
+      - name: behaviour specifications
+        run: go test ./internal/features/ -v
 
   race:
     runs-on: ubuntu-latest

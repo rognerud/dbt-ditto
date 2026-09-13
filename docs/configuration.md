@@ -11,7 +11,10 @@ is enforced by a case in
 The ```gherkin blocks here run on every `go test`, against the real binary, so a
 key whose documented effect changed fails the build
 ([how](usage.md#using-dbt-ditto)). Each block writes the config file it is about
-and then reads what the run produced.
+and then reads what the run produced, and each is folded away until you open it.
+
+<details>
+<summary>The config file is what a run without a project directory uses</summary>
 
 ```gherkin
 Scenario: the config file is what a run without a project directory uses
@@ -31,6 +34,8 @@ Scenario: the config file is what a run without a project directory uses
     """
 ```
 
+</details>
+
 ## Which projects take part
 
 | Key | Default | Change it to… |
@@ -40,6 +45,9 @@ Scenario: the config file is what a run without a project directory uses
 | `projects[].manifest` | — | an upstream that is only a `manifest.json(.gz)`. Read-only |
 | `projects[].upstream` | `false` | take documentation *from* this project, never write it |
 | `loom` | `true` | `false` ignores `dbt_loom.config.yml`; on, its `type: file` manifests load as upstreams |
+
+<details>
+<summary>Projects[].target reads the artifacts from where CI left them</summary>
 
 ```gherkin
 Scenario: projects[].target reads the artifacts from where CI left them
@@ -61,6 +69,8 @@ Scenario: projects[].target reads the artifacts from where CI left them
     """
 ```
 
+</details>
+
 ## What travels between columns
 
 | Key | Default | Change it to… |
@@ -81,6 +91,9 @@ Scenario: projects[].target reads the artifacts from where CI left them
 | `inheritance.derived.aggregates` | `true` | `false` stops matching `total_amount_cents` to `amount_cents` |
 | `inheritance.derived.prefixes` | `sum`, `total`, `avg`, … | words stripped from the front before matching |
 | `inheritance.derived.suffixes` | `sum`, `count`, `cnt`, … | words stripped from the end. Dropping `count` stops `order_id_count` inheriting `order_id` |
+
+<details>
+<summary>Inheritance.columns false leaves the descriptions alone (+5 more)</summary>
 
 ```gherkin
 Scenario: inheritance.columns false leaves the descriptions alone
@@ -200,6 +213,8 @@ Scenario: inheritance.node_description gives a model the description above it
     """
 ```
 
+</details>
+
 ## Pointing at an answer, and recording where it came from
 
 | Key | Default | Change it to… |
@@ -211,6 +226,9 @@ Scenario: inheritance.node_description gives a model the description above it
 | `inheritance.warn_ambiguous` | `true` | `false` stops reporting columns whose parents disagree |
 | `inheritance.ambiguity_meta` | `false` | `true` records the disagreement in the column's meta |
 | `inheritance.ambiguity_key` | `dbt_ditto_ambiguous` | rename that meta key |
+
+<details>
+<summary>Inheritance.directives false makes a pointer into prose (+2 more)</summary>
 
 ```gherkin
 Scenario: inheritance.directives false makes a pointer into prose
@@ -292,6 +310,8 @@ Scenario: inheritance.progenitor_key renames the meta key that records the origi
   And the file "models/_stg_orders.yml" does not contain "osmosis_progenitor"
 ```
 
+</details>
+
 ## What the column list looks like afterwards
 
 | Key | Default | Change it to… |
@@ -306,6 +326,9 @@ Scenario: inheritance.progenitor_key renames the meta key that records the origi
 | `organize.enabled` | `true` | `false` leaves every model where it is documented today |
 | `organize.delete_empty` | `true` | `false` keeps a schema file whose last model moved out |
 | `output.comments` | `follow` | `osmosis` reproduces dbt-osmosis' loss of all but the first comment in a column list |
+
+<details>
+<summary>By default the warehouse decides the column list, its types and its order (+7 more)</summary>
 
 ```gherkin
 Scenario: by default the warehouse decides the column list, its types and its order
@@ -555,6 +578,8 @@ Scenario: output.comments osmosis keeps only the first comment in a column list
     """
   And the file "models/_stg_orders.yml" does not contain "the clerk's own words"
 ```
+
+</details>
 
 Source-provider settings (`sources.*`):
 [source-providers.md](source-providers.md#settings).

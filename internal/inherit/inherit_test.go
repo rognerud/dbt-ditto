@@ -558,6 +558,103 @@ func TestAlphabeticalColumnOrder(t *testing.T) {
 	}
 }
 
+// yamlOrderResolver builds a project whose catalog is the column truth, which is
+// what `column_order: yaml` reorders. Without a catalog there is no truth to
+// reorder and the setting does nothing.
+func yamlOrderResolver(t *testing.T, columns ...string) (*Resolver, *dbt.Node) {
+	t.Helper()
+	cols := make([]*dbt.Column, 0, len(columns))
+	for _, c := range columns {
+		cols = append(cols, col(c, ""))
+	}
+	down := node("p", "stg", nil, cols...)
+	p := project("p", down)
+	catalogFor(p, down, columns...)
+
+	order := config.OrderYAML
+	return resolverFor(t, func(c *config.Config) { c.Columns.Order = &order }, p), down
+}
+
+// `column_order: yaml` is what a team uses to stop dbt-ditto reshuffling files
+// they have already arranged: the columns the file lists keep their places, and
+// anything new lands after them.
+func TestYAMLColumnOrderKeepsTheFileAndAppendsTheRest(t *testing.T) {
+	r, down := yamlOrderResolver(t, "alpha", "mike", "zulu")
+
+	doc := r.Resolve(down, Existing{Columns: []ExistingColumn{
+		{Name: "zulu"}, {Name: "alpha"},
+	}})
+	want := []string{"zulu", "alpha", "mike"}
+	if got := columnNames(doc); !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v: the file's order first, then what it did not list", got, want)
+	}
+}
+
+// The existing list is matched through the configured folding, or a file
+// spelling a column ORDER_ID would have it duplicated at the end. The file's own
+// spelling is kept: matching is case-insensitive, rewriting is not.
+func TestYAMLColumnOrderMatchesTheFileCaseInsensitively(t *testing.T) {
+	r, down := yamlOrderResolver(t, "order_id", "amount")
+
+	doc := r.Resolve(down, Existing{Columns: []ExistingColumn{{Name: "ORDER_ID"}}})
+	want := []string{"ORDER_ID", "amount"}
+	if got := columnNames(doc); !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v: matched case-insensitively, spelled as the file does", got, want)
+	}
+}
+
+// A column the file lists twice, and one it lists that the warehouse no longer
+// has, must not produce a duplicate or a phantom entry.
+func TestYAMLColumnOrderIgnoresRepeatedAndVanishedEntries(t *testing.T) {
+	r, down := yamlOrderResolver(t, "a", "b")
+
+	doc := r.Resolve(down, Existing{Columns: []ExistingColumn{
+		{Name: "b"}, {Name: "b"}, {Name: "gone"},
+	}})
+	want := []string{"b", "a"}
+	if got := columnNames(doc); !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+// A file that lists nothing yet leaves the catalog order alone.
+func TestYAMLColumnOrderOnAnEmptyFileIsTheCatalogOrder(t *testing.T) {
+	r, down := yamlOrderResolver(t, "zulu", "alpha", "mike")
+
+	doc := r.Resolve(down, Existing{})
+	want := []string{"zulu", "alpha", "mike"}
+	if got := columnNames(doc); !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+// The default is the catalog's own ordinal, which is what reproduces
+// dbt-osmosis: what the file happens to list does not move anything.
+func TestCatalogColumnOrderFollowsTheWarehouseNotTheFile(t *testing.T) {
+	down := node("p", "stg", nil, col("zulu", ""), col("alpha", ""))
+	p := project("p", down)
+	catalogFor(p, down, "zulu", "alpha")
+	r := resolverFor(t, nil, p)
+
+	doc := r.Resolve(down, Existing{Columns: []ExistingColumn{{Name: "alpha"}}})
+	if got := columnNames(doc); !reflect.DeepEqual(got, []string{"zulu", "alpha"}) {
+		t.Errorf("order = %v, want the catalog ordinal, not the file's order", got)
+	}
+}
+
+// With no catalog there is no warehouse truth, so `column_order: yaml` has
+// nothing to reorder and the manifest's stable order stands.
+func TestYAMLColumnOrderWithoutACatalogChangesNothing(t *testing.T) {
+	down := node("p", "stg", nil, col("zulu", ""), col("alpha", ""))
+	order := config.OrderYAML
+	r := resolverFor(t, func(c *config.Config) { c.Columns.Order = &order }, project("p", down))
+
+	doc := r.Resolve(down, Existing{Columns: []ExistingColumn{{Name: "zulu"}}})
+	if got := columnNames(doc); !reflect.DeepEqual(got, []string{"alpha", "zulu"}) {
+		t.Errorf("order = %v, want the manifest's stable order", got)
+	}
+}
+
 // --- graph shape -----------------------------------------------------------
 
 // A diamond reaches the shared root by two routes.
