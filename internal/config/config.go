@@ -419,7 +419,10 @@ func (c *Config) Resolve() Resolved {
 	}
 
 	placeholders := sliceOr(c.Inheritance.Placeholders, DefaultPlaceholders)
-	r.Placeholders = make(map[string]bool, len(placeholders)+1)
+	// The capacity is a hint, so the empty string below is not counted: the
+	// arithmetic to include it is what go/allocation-size-overflow objects to,
+	// and a map that grows by one entry costs nothing worth the suppression.
+	r.Placeholders = make(map[string]bool, len(placeholders))
 	r.Placeholders[""] = true
 	for _, p := range placeholders {
 		r.Placeholders[p] = true
