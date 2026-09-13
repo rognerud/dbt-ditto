@@ -64,18 +64,22 @@ RUFF_VERSION        := 0.16.7
 $(TOOLS)/golangci-lint: | $(TMPDIR)
 	GOBIN=$(TOOLS) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
+# GOTOOLCHAIN=auto on the tools that declare a newer Go than this module does:
+# govulncheck v1.8.0 wants 1.26, and the toolchain directive in go.mod is 1.25.8.
+# Without it the install fails wherever GOTOOLCHAIN is local — which is every CI
+# run, since setup-go pins it to the version it installed.
 $(TOOLS)/govulncheck: | $(TMPDIR)
-	GOBIN=$(TOOLS) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	GOBIN=$(TOOLS) GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
 $(TOOLS)/actionlint: | $(TMPDIR)
-	GOBIN=$(TOOLS) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+	GOBIN=$(TOOLS) GOTOOLCHAIN=auto go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 
 # Trivy needs encoding/json/v2, which is behind a build tag in Go 1.26.
 $(TOOLS)/trivy: | $(TMPDIR)
-	GOBIN=$(TOOLS) GOEXPERIMENT=jsonv2 go install github.com/aquasecurity/trivy/cmd/trivy@$(TRIVY_VERSION)
+	GOBIN=$(TOOLS) GOTOOLCHAIN=auto GOEXPERIMENT=jsonv2 go install github.com/aquasecurity/trivy/cmd/trivy@$(TRIVY_VERSION)
 
-# pinact declares a newer Go than this module needs, so let the toolchain fetch
-# the one it asks for rather than pinning this repository to it.
+# Same reason as govulncheck above: pinact declares a newer Go than this module
+# needs, so let the toolchain fetch the one it asks for.
 $(TOOLS)/pinact: | $(TMPDIR)
 	GOBIN=$(TOOLS) GOTOOLCHAIN=auto go install github.com/suzuki-shunsuke/pinact/v5/cmd/pinact@$(PINACT_VERSION)
 

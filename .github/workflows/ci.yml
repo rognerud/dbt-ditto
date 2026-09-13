@@ -80,7 +80,11 @@ jobs:
 
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # GOTOOLCHAIN=auto for the install only: setup-go pins GOTOOLCHAIN to
+          # the version in go.mod, and govulncheck declares a newer Go than this
+          # module needs. The scan itself runs under this module's toolchain,
+          # which is what decides the stdlib version it reports on.
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
       # Covers uv.lock as well, which govulncheck cannot see: the source
@@ -138,7 +142,9 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: actionlint
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          # GOTOOLCHAIN=auto for the same reason as govulncheck and pinact: an
+          # `@latest` tool may declare a newer Go than go.mod's toolchain line.
+          GOTOOLCHAIN=auto go install github.com/rhysd/actionlint/cmd/actionlint@latest
           actionlint
 
       # actionlint checks that a workflow is well-formed, not that the actions it
