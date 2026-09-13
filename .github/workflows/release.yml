@@ -61,9 +61,13 @@ jobs:
       # so it would otherwise point at files claiming the previous version.
       # Force-moving it is safe only because this runs seconds after the tag was
       # created and before anything has been built from it.
+      # The checkout above keeps no credentials, so the token is handed to the
+      # two pushes directly rather than left in .git/config for every later
+      # step to use.
       - name: commit the bump and bring the tag with it
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -74,9 +78,10 @@ jobs:
             exit 0
           fi
           git commit -m "release ${TAG}"
-          git push origin HEAD:main
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push "${remote}" HEAD:main
           git tag -f "${TAG}"
-          git push -f origin "refs/tags/${TAG}"
+          git push -f "${remote}" "refs/tags/${TAG}"
 
   build:
     needs: version
