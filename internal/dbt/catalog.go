@@ -29,10 +29,9 @@ type CatalogNode struct {
 	Metadata CatalogMetadata          `json:"metadata"`
 	Columns  map[string]CatalogColumn `json:"columns"`
 
-	ordered     []CatalogColumn
-	orderedOnce sync.Once
-	folded      map[string]CatalogColumn
-	foldedOnce  sync.Once
+	orderedOnce, foldedOnce sync.Once
+	ordered                 []CatalogColumn
+	folded                  map[string]CatalogColumn
 }
 
 // Folded indexes the entry's columns by lower-cased name.

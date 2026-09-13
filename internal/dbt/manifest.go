@@ -54,24 +54,39 @@ func (c *Column) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
+	decoded := make(map[string]any, len(ExtraColumnKeys))
 	for _, key := range ExtraColumnKeys {
-		msg, ok := raw[key]
-		if !ok {
-			continue
-		}
 		var v any
-		if err := json.Unmarshal(msg, &v); err != nil {
-			continue // a key we do not understand is not worth failing a run over
+		// A key we cannot decode is not worth failing a run over.
+		if err := json.Unmarshal(raw[key], &v); err == nil {
+			decoded[key] = v
 		}
-		if v == nil {
+	}
+	c.Extra = MergeExtra(c.Extra, decoded, ExtraColumnKeys, true)
+	return nil
+}
+
+// MergeExtra copies the named keys from src into dst, allocating only when
+// something is carried. Absent, null and — unless overwrite is set — already
+// taken keys are left alone, which is how every caller wants extras to travel.
+func MergeExtra(dst, src map[string]any, keys []string, overwrite bool) map[string]any {
+	if len(src) == 0 {
+		return dst
+	}
+	for _, k := range keys {
+		v, ok := src[k]
+		if !ok || v == nil {
 			continue
 		}
-		if c.Extra == nil {
-			c.Extra = make(map[string]any, len(ExtraColumnKeys))
+		if _, taken := dst[k]; taken && !overwrite {
+			continue
 		}
-		c.Extra[key] = v
+		if dst == nil {
+			dst = make(map[string]any, len(keys))
+		}
+		dst[k] = v
 	}
-	return nil
+	return dst
 }
 
 // EffectiveMeta merges the column's top-level meta with its `config.meta`,
@@ -263,38 +278,18 @@ func LoadManifest(path string) (*Manifest, error) {
 
 // decode reads a manifest as a stream.
 func (m *Manifest) decode(dec *json.Decoder) error {
-	if err := expectObject(dec, "a JSON object at the top level"); err != nil {
-		return err
-	}
-
 	order := 0
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		key, _ := keyTok.(string)
+	return eachMember(dec, "a JSON object at the top level", func(key string) error {
 		switch key {
 		case "metadata":
-			if err := dec.Decode(&m.Metadata); err != nil {
-				return err
-			}
+			return dec.Decode(&m.Metadata)
 		case "nodes":
-			if err := decodeNodeMap(dec, m.Nodes, m, &order, ""); err != nil {
-				return err
-			}
+			return decodeNodeMap(dec, m.Nodes, m, &order, "")
 		case "sources":
-			if err := decodeNodeMap(dec, m.Sources, m, &order, "source"); err != nil {
-				return err
-			}
-		default:
-			if err := skipValue(dec); err != nil {
-				return err
-			}
+			return decodeNodeMap(dec, m.Sources, m, &order, "source")
 		}
-	}
-	_, err := dec.Token() // closing brace
-	return err
+		return skipValue(dec)
+	})
 }
 
 // expectObject consumes the `{` opening a JSON object, naming what was wanted.
@@ -309,9 +304,10 @@ func expectObject(dec *json.Decoder, what string) error {
 	return nil
 }
 
-// decodeNodeMap reads one `{unique_id: node}` object.
-func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order *int, forceType string) error {
-	if err := expectObject(dec, "an object of nodes"); err != nil {
+// eachMember walks a JSON object, calling fn with each key while the decoder
+// stands on that key's value, and consumes the closing brace.
+func eachMember(dec *json.Decoder, what string, fn func(key string) error) error {
+	if err := expectObject(dec, what); err != nil {
 		return err
 	}
 	for dec.More() {
@@ -319,7 +315,21 @@ func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order 
 		if err != nil {
 			return err
 		}
-		id, _ := keyTok.(string)
+		key, ok := keyTok.(string)
+		if !ok {
+			return fmt.Errorf("expected an object key, got %v", keyTok)
+		}
+		if err := fn(key); err != nil {
+			return err
+		}
+	}
+	_, err := dec.Token() // closing brace
+	return err
+}
+
+// decodeNodeMap reads one `{unique_id: node}` object.
+func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order *int, forceType string) error {
+	return eachMember(dec, "an object of nodes", func(id string) error {
 		n := &Node{}
 		if err := dec.Decode(n); err != nil {
 			return fmt.Errorf("node %s: %w", id, err)
@@ -332,9 +342,8 @@ func decodeNodeMap(dec *json.Decoder, into map[string]*Node, m *Manifest, order 
 			n.ResourceType = forceType
 		}
 		into[id] = n
-	}
-	_, err := dec.Token() // closing brace
-	return err
+		return nil
+	})
 }
 
 // skipValue consumes the next value without materialising it.

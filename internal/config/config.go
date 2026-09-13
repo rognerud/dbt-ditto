@@ -187,11 +187,13 @@ var Filenames = []string{"dbt_ditto.yml", "dbt_ditto.yaml", ".dbt_ditto.yml", Py
 // Load reads the config at path.
 func Load(path string) (*Config, error) {
 	if path == "" {
-		found, err := discover()
+		dir, err := os.Getwd()
 		if err != nil {
 			return nil, err
 		}
-		path = found
+		if path, err = discoverFrom(dir); err != nil {
+			return nil, err
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -219,14 +221,15 @@ func Load(path string) (*Config, error) {
 
 // SourceCachePath resolves the cache against the config file's own directory.
 func (c *Config) SourceCachePath() string {
-	p := DefaultSourceCache
-	if c.Sources.Cache != nil && *c.Sources.Cache != "" {
-		p = *c.Sources.Cache
+	return AbsTo(c.Dir, strOr(c.Sources.Cache, DefaultSourceCache))
+}
+
+// AbsTo resolves a configured path against the directory it was configured in.
+func AbsTo(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
 	}
-	if filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(c.Dir, p)
+	return filepath.Join(dir, path)
 }
 
 // DefaultSourceCache sits under `target/`, which projects already gitignore.
@@ -241,14 +244,6 @@ func Default(projectDir string) *Config {
 	}
 	c.attachLoomUpstreams()
 	return c
-}
-
-func discover() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	return discoverFrom(dir)
 }
 
 // discoverFrom walks upwards from dir looking for a config this tool owns.
@@ -306,44 +301,26 @@ const DefaultDirectivePrefix = "Inherited:"
 // Resolved is the config with every default filled in, so nothing downstream
 // deals with nil pointers.
 type Resolved struct {
-	InheritColumns         bool
-	InheritNodeDescription bool
-	InheritMeta            bool
-	InheritTags            bool
-	CaseInsensitive        bool
-	Force                  bool
-	Placeholders           map[string]bool
-	Progenitor             bool
-	ProgenitorKey          string
-	SkipMetaKeys           map[string]bool
-	Directives             bool
-	DirectivePrefix        string
-	WarnAmbiguous          bool
-	AmbiguityMeta          bool
-	AmbiguityKey           string
+	InheritColumns, InheritNodeDescription, InheritMeta, InheritTags bool
+	CaseInsensitive, Force                                           bool
+	Progenitor, Directives, WarnAmbiguous, AmbiguityMeta             bool
+	ProgenitorKey, DirectivePrefix, AmbiguityKey                     string
+	Placeholders, SkipMetaKeys                                       map[string]bool
 
-	AddMissing  bool
-	RemoveStale bool
-	DataTypes   bool
-	ColumnCase  string
-	ColumnOrder string
+	AddMissing, RemoveStale, DataTypes bool
+	ColumnCase, ColumnOrder            string
 
 	ExpandStructs     bool
 	WarehouseComments string
 
-	Backfill            bool
-	BackfillSourcesOnly bool
+	Backfill, BackfillSourcesOnly bool
 
-	DerivedStructs    bool
-	DerivedAggregates bool
-	DerivedPrefixes   []string
-	DerivedSuffixes   []string
+	DerivedStructs, DerivedAggregates bool
+	DerivedPrefixes, DerivedSuffixes  []string
 
-	Organize    bool
-	DeleteEmpty bool
+	Organize, DeleteEmpty bool
 
-	Comments string
-
+	Comments  string
 	ExtraKeys []string
 
 	SourcesStrict bool
@@ -381,16 +358,11 @@ const DefaultTagFormat = "{key}:{value}"
 
 // ResolvedLabels is Labels with the defaults filled in.
 type ResolvedLabels struct {
-	Mode      string
-	MetaKey   string
-	TagFormat string
-	Include   []string
-	Exclude   []string
+	Mode, MetaKey, TagFormat string
+	Include, Exclude         []string
 
-	PropagateColumn  bool
-	PropagateStructs bool
-	Aggregates       string
-	OnConflict       string
+	PropagateColumn, PropagateStructs bool
+	Aggregates, OnConflict            string
 }
 
 // Routed reports whether labels end up anywhere at all.
@@ -446,10 +418,7 @@ func (c *Config) Resolve() Resolved {
 		Comments:          strOr(c.Output.Comments, CommentsFollow),
 	}
 
-	placeholders := c.Inheritance.Placeholders
-	if placeholders == nil {
-		placeholders = DefaultPlaceholders
-	}
+	placeholders := sliceOr(c.Inheritance.Placeholders, DefaultPlaceholders)
 	r.Placeholders = make(map[string]bool, len(placeholders)+1)
 	r.Placeholders[""] = true
 	for _, p := range placeholders {
@@ -492,14 +461,8 @@ func (c *Config) Resolve() Resolved {
 	if boolOr(c.Inheritance.Derived.Enabled, false) {
 		r.DerivedStructs = boolOr(c.Inheritance.Derived.Structs, true)
 		r.DerivedAggregates = boolOr(c.Inheritance.Derived.Aggregates, true)
-		r.DerivedPrefixes = c.Inheritance.Derived.Prefixes
-		if r.DerivedPrefixes == nil {
-			r.DerivedPrefixes = DefaultAggregatePrefixes
-		}
-		r.DerivedSuffixes = c.Inheritance.Derived.Suffixes
-		if r.DerivedSuffixes == nil {
-			r.DerivedSuffixes = DefaultAggregateSuffixes
-		}
+		r.DerivedPrefixes = sliceOr(c.Inheritance.Derived.Prefixes, DefaultAggregatePrefixes)
+		r.DerivedSuffixes = sliceOr(c.Inheritance.Derived.Suffixes, DefaultAggregateSuffixes)
 	}
 	return r
 }
@@ -543,4 +506,13 @@ func strOr(p *string, def string) string {
 		return def
 	}
 	return *p
+}
+
+// sliceOr keeps the configured list, defaulting only when the key is absent: an
+// empty list is a choice, a missing one is not.
+func sliceOr(v, def []string) []string {
+	if v == nil {
+		return def
+	}
+	return v
 }

@@ -10,8 +10,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/rognerud/dbt-ditto/internal/par"
 )
 
 // Provider is one configured external program and the sources it answers for.
@@ -55,34 +56,25 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 		return set
 	}
 
-	type result struct {
+	results := make([]struct {
 		resp *Response
 		err  error
-	}
-	results := make([]result, len(providers))
+	}, len(providers))
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, runtime.NumCPU())
+	// Which sources each provider answers for, worked out before any of them run.
+	claimed := make([][]RequestSource, len(providers))
 	for i, p := range providers {
-		claimed := make([]RequestSource, 0, len(want))
 		for _, s := range want {
 			if p.Claims(s) {
-				claimed = append(claimed, s)
+				claimed[i] = append(claimed[i], s)
 			}
 		}
-		if len(claimed) == 0 {
-			continue
-		}
-		wg.Add(1)
-		go func(i int, p Provider, claimed []RequestSource) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			resp, err := run(ctx, p, projects, claimed)
-			results[i].resp, results[i].err = resp, err
-		}(i, p, claimed)
 	}
-	wg.Wait()
+	par.Do(len(providers), func(i int) {
+		if len(claimed[i]) > 0 {
+			results[i].resp, results[i].err = run(ctx, providers[i], projects, claimed[i])
+		}
+	})
 
 	// Merged in configured order, so "first provider to claim a source wins" is a
 	// rule someone can read off their own config.
@@ -99,15 +91,10 @@ func Fetch(ctx context.Context, providers []Provider, projects []RequestProject,
 		set.Warnings = append(set.Warnings, res.resp.Warning...)
 		for i := range res.resp.Sources {
 			d := res.resp.Sources[i]
-			if d.UniqueID == "" {
-				continue
-			}
-			if _, taken := set.Docs[d.UniqueID]; taken {
+			if !set.add(&d) && d.UniqueID != "" {
 				set.Warnings = append(set.Warnings, fmt.Sprintf(
 					"%s: answered by more than one provider; kept the first", d.UniqueID))
-				continue
 			}
-			set.Docs[d.UniqueID] = &d
 		}
 	}
 	sort.Strings(set.Warnings)

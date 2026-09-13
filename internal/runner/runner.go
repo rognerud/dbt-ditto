@@ -6,16 +6,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/rognerud/dbt-ditto/internal/config"
 	"github.com/rognerud/dbt-ditto/internal/dbt"
 	"github.com/rognerud/dbt-ditto/internal/inherit"
+	"github.com/rognerud/dbt-ditto/internal/par"
 	"github.com/rognerud/dbt-ditto/internal/yamlfile"
 	"gopkg.in/yaml.v3"
 )
@@ -35,11 +33,7 @@ type Options struct {
 }
 
 // Change is one recorded edit, for reporting.
-type Change struct {
-	Node   string
-	File   string
-	Detail string
-}
+type Change struct{ Node, File, Detail string }
 
 // Report summarises a run.
 type Report struct {
@@ -71,10 +65,11 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	}
 
 	graph := inherit.BuildGraph(projects)
+	external, shadowed := graph.ClassifySources()
 
 	// Folded in before resolution, so nothing downstream can tell a provider's
 	// answer from a catalog dbt generated.
-	notes, err := applySources(cfg, resolved, graph, opts)
+	notes, err := applySources(cfg, resolved, external, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +87,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	targets := selectNodes(projects, opts.Select)
 	rep := &Report{NodesScanned: len(targets), Notes: notes}
-	rep.Warnings = append(rep.Warnings, shadowedSourceWarnings(graph, targets)...)
+	rep.Warnings = append(rep.Warnings, shadowedSourceWarnings(shadowed, targets)...)
 
 	// Work out which YAML file each node lives in now and which it should live in
 	// after organising, then load every file involved in one parallel pass.
@@ -127,7 +122,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	files := make(map[string]*yamlfile.File, len(paths))
 	loadErrs := make([]error, len(paths))
 	loaded := make([]*yamlfile.File, len(paths))
-	parallel(len(paths), func(i int) {
+	par.Do(len(paths), func(i int) {
 		loaded[i], loadErrs[i] = yamlfile.LoadOrNew(paths[i])
 	})
 	for i, err := range loadErrs {
@@ -139,7 +134,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	// Resolving is the expensive part and only reads, so it runs in parallel.
 	docs := make([]*inherit.NodeDoc, len(placements))
-	parallel(len(placements), func(i int) {
+	par.Do(len(placements), func(i int) {
 		p := placements[i]
 		var existing inherit.Existing
 		if p.from != "" {
@@ -180,44 +175,37 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		}
 
 		wopts := writeOpts{cfg: resolved, configBlock: configBlockFor(p.node)}
-		if changes := writeDoc(dst, p.node, doc, wopts); len(changes) > 0 {
-			for _, c := range changes {
-				rep.Changes = append(rep.Changes, Change{Node: p.node.UniqueID, File: p.to, Detail: c})
-			}
+		for _, c := range writeDoc(dst, p.node, doc, wopts) {
+			rep.Changes = append(rep.Changes, Change{Node: p.node.UniqueID, File: p.to, Detail: c})
 		}
 	}
 
 	// Save, and drop files organising emptied out.
 	type outcome struct {
-		rel     string
-		written bool
-		deleted bool
-		err     error
+		rel              string
+		written, deleted bool
+		err              error
 	}
 	outcomes := make([]outcome, len(paths))
-	parallel(len(paths), func(i int) {
+	par.Do(len(paths), func(i int) {
 		path, f := paths[i], files[paths[i]]
 		o := outcome{rel: relTo(projects, path)}
 		defer func() { outcomes[i] = o }()
 
-		if !f.IsEmpty() {
+		switch {
+		case !f.IsEmpty(), !resolved.DeleteEmpty && !f.Created:
 			o.written, o.err = f.Save(opts.DryRun)
-			return
-		}
-		if f.Created {
-			return // never existed, nothing to write or delete
-		}
-		if !resolved.DeleteEmpty {
-			o.written, o.err = f.Save(opts.DryRun)
-			return
-		}
-		if !opts.DryRun {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				o.err = err
-				return
+		case f.Created:
+			// Never existed, nothing to write or delete.
+		default:
+			if !opts.DryRun {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					o.err = err
+					return
+				}
 			}
+			o.deleted = true
 		}
-		o.deleted = true
 	})
 
 	for _, o := range outcomes {
@@ -237,30 +225,6 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	return rep, nil
 }
 
-// parallel runs body for every index in [0, n), one goroutine per CPU.
-func parallel(n int, body func(i int)) {
-	workers := min(runtime.GOMAXPROCS(0), n)
-	if workers <= 1 {
-		for i := range n {
-			body(i)
-		}
-		return
-	}
-
-	var next atomic.Int64
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for range workers {
-		go func() {
-			defer wg.Done()
-			for i := int(next.Add(1)) - 1; i < n; i = int(next.Add(1)) - 1 {
-				body(i)
-			}
-		}()
-	}
-	wg.Wait()
-}
-
 // configBlockFor decides whether a node's column meta and tags belong inside a
 // `config:` block, from the dbt version that produced the manifest, as dbt-osmosis'
 // fusion_compat detection does.
@@ -272,15 +236,15 @@ func configBlockFor(n *dbt.Node) bool {
 func loadProjects(cfg *config.Config) ([]*dbt.Project, error) {
 	out := make([]*dbt.Project, len(cfg.Projects))
 	errs := make([]error, len(cfg.Projects))
-	parallel(len(cfg.Projects), func(i int) {
+	par.Do(len(cfg.Projects), func(i int) {
 		ref := cfg.Projects[i]
 		// A manifest-only ref has no project directory to read dbt_project.yml from.
 		named := ref.Path
 		if ref.Manifest != "" {
 			named = ref.Manifest
-			out[i], errs[i] = dbt.LoadManifestOnly(ref.Name, absTo(cfg.Dir, ref.Manifest))
+			out[i], errs[i] = dbt.LoadManifestOnly(ref.Name, config.AbsTo(cfg.Dir, ref.Manifest))
 		} else {
-			out[i], errs[i] = dbt.LoadProject(absTo(cfg.Dir, ref.Path), ref.Target, !ref.Upstream)
+			out[i], errs[i] = dbt.LoadProject(config.AbsTo(cfg.Dir, ref.Path), ref.Target, !ref.Upstream)
 		}
 		if errs[i] != nil {
 			errs[i] = fmt.Errorf("project %s: %w", named, errs[i])
@@ -385,16 +349,9 @@ func defaultSchemaPath(n *dbt.Node) string {
 	return filepath.ToSlash(filepath.Join(filepath.Dir(src), "_"+n.Name+".yml"))
 }
 
-func absTo(dir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(dir, path)
-}
-
 func relTo(projects []*dbt.Project, abs string) string {
 	for _, p := range projects {
-		if rel, err := filepath.Rel(p.Root, abs); err == nil && !strings.HasPrefix(rel, "..") {
+		if rel := config.Rel(p.Root, abs); rel != abs {
 			return filepath.ToSlash(filepath.Join(filepath.Base(p.Root), rel))
 		}
 	}

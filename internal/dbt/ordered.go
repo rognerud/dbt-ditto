@@ -3,7 +3,6 @@ package dbt
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
 
@@ -109,26 +108,14 @@ func (m *OrderedMap) UnmarshalJSON(data []byte) error {
 
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	if err := expectObject(dec, "a JSON object"); err != nil {
-		return err
-	}
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		key, ok := keyTok.(string)
-		if !ok {
-			return fmt.Errorf("expected an object key, got %v", keyTok)
-		}
+	return eachMember(dec, "a JSON object", func(key string) error {
 		var val any
 		if err := dec.Decode(&val); err != nil {
 			return err
 		}
 		m.Set(key, normaliseNumbers(val))
-	}
-	_, err := dec.Token() // closing brace
-	return err
+		return nil
+	})
 }
 
 // MarshalJSON re-encodes in key order.

@@ -30,20 +30,17 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &File{Path: path, original: raw}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		f.Doc = newDoc()
-		f.loadedPrint = fingerprint(f.Doc)
-		return f, nil
+	f := &File{Path: path, Doc: newDoc(), original: raw}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		var doc yaml.Node
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("parse %s: expected a top-level mapping", path)
+		}
+		f.Doc = &doc
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("parse %s: expected a top-level mapping", path)
-	}
-	f.Doc = &doc
 	f.loadedPrint = fingerprint(f.Doc)
 	return f, nil
 }
@@ -138,12 +135,9 @@ func hashNode(h *uint64, n *yaml.Node) {
 	}
 	hashUint(h, uint64(n.Kind))
 	hashUint(h, uint64(n.Style))
-	hashString(h, n.Tag)
-	hashString(h, n.Value)
-	hashString(h, n.Anchor)
-	hashString(h, n.HeadComment)
-	hashString(h, n.LineComment)
-	hashString(h, n.FootComment)
+	for _, s := range [...]string{n.Tag, n.Value, n.Anchor, n.HeadComment, n.LineComment, n.FootComment} {
+		hashString(h, s)
+	}
 	hashUint(h, uint64(len(n.Content)))
 	for _, c := range n.Content {
 		hashNode(h, c)
@@ -279,15 +273,23 @@ func findByName(seq *yaml.Node, name string) *yaml.Node {
 	return nil
 }
 
-// MapGet returns the value node for key in a mapping, or nil.
-func MapGet(m *yaml.Node, key string) *yaml.Node {
+// pairIndex returns the position of key's own node in a mapping, or -1.
+func pairIndex(m *yaml.Node, key string) int {
 	if m == nil || m.Kind != yaml.MappingNode {
-		return nil
+		return -1
 	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
-			return m.Content[i+1]
+			return i
 		}
+	}
+	return -1
+}
+
+// MapGet returns the value node for key in a mapping, or nil.
+func MapGet(m *yaml.Node, key string) *yaml.Node {
+	if i := pairIndex(m, key); i >= 0 {
+		return m.Content[i+1]
 	}
 	return nil
 }
@@ -295,30 +297,36 @@ func MapGet(m *yaml.Node, key string) *yaml.Node {
 // MapSet assigns key in a mapping, replacing the value in place when the key
 // exists so key order and attached comments are preserved.
 func MapSet(m *yaml.Node, key string, val *yaml.Node) {
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
-			val.HeadComment = m.Content[i+1].HeadComment
-			val.LineComment = m.Content[i+1].LineComment
-			val.FootComment = m.Content[i+1].FootComment
-			m.Content[i+1] = val
-			return
-		}
+	i := pairIndex(m, key)
+	if i < 0 {
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, val)
+		return
 	}
-	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, val)
+	old := m.Content[i+1]
+	val.HeadComment, val.LineComment, val.FootComment = old.HeadComment, old.LineComment, old.FootComment
+	m.Content[i+1] = val
 }
 
 // MapDelete removes key from a mapping and reports whether it was present.
 func MapDelete(m *yaml.Node, key string) bool {
-	if m == nil || m.Kind != yaml.MappingNode {
+	i := pairIndex(m, key)
+	if i < 0 {
 		return false
 	}
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
-			m.Content = append(m.Content[:i], m.Content[i+2:]...)
-			return true
-		}
+	m.Content = append(m.Content[:i], m.Content[i+2:]...)
+	return true
+}
+
+// MoveLast shifts a key, and its value, to the end of a mapping, leaving the
+// rest of the order alone.
+func MoveLast(m *yaml.Node, key string) {
+	i := pairIndex(m, key)
+	if i < 0 || i+2 == len(m.Content) {
+		return
 	}
-	return false
+	k, v := m.Content[i], m.Content[i+1]
+	m.Content = append(m.Content[:i], m.Content[i+2:]...)
+	m.Content = append(m.Content, k, v)
 }
 
 // Scalar builds a string scalar, using a literal block for multi-line text so
@@ -348,16 +356,15 @@ func StringOf(n *yaml.Node) string {
 func Encode(v any) (*yaml.Node, error) {
 	switch t := v.(type) {
 	case nil:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, nil
+		return scalar("!!null", "null"), nil
 	case string:
 		return Scalar(t), nil
 	case bool:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(t)}, nil
+		return scalar("!!bool", strconv.FormatBool(t)), nil
 	case int, int8, int16, int32, int64:
-		return intNode(reflect.ValueOf(v).Int()), nil
+		return scalar("!!int", strconv.FormatInt(reflect.ValueOf(v).Int(), 10)), nil
 	case uint, uint8, uint16, uint32, uint64:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int",
-			Value: strconv.FormatUint(reflect.ValueOf(v).Uint(), 10)}, nil
+		return scalar("!!int", strconv.FormatUint(reflect.ValueOf(v).Uint(), 10)), nil
 	case float32, float64:
 		return floatNode(reflect.ValueOf(v).Float()), nil
 	}
@@ -369,10 +376,6 @@ func Encode(v any) (*yaml.Node, error) {
 	return &n, nil
 }
 
-func intNode(v int64) *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.FormatInt(v, 10)}
-}
-
 func floatNode(v float64) *yaml.Node {
 	s := strconv.FormatFloat(v, 'g', -1, 64)
 	// A float that formats without a marker would read back as an integer, so
@@ -380,7 +383,11 @@ func floatNode(v float64) *yaml.Node {
 	if !strings.ContainsAny(s, ".eEnN") {
 		s += ".0"
 	}
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: s}
+	return scalar("!!float", s)
+}
+
+func scalar(tag, value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
 }
 
 // DecodeStrings reads a sequence node back into a string slice.

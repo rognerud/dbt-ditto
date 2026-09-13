@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -113,18 +112,7 @@ func applyColumn(n *dbt.Node, c ColumnDoc, cfg config.Resolved) []string {
 	// Extra keys are carried only when the project asked for them by name, so a
 	// provider reporting a policy tag into a project that never configured
 	// `inheritance.extra_keys` writes nothing.
-	for _, key := range cfg.ExtraKeys {
-		v, ok := c.Extra[key]
-		if !ok || v == nil {
-			continue
-		}
-		if col.Extra == nil {
-			col.Extra = map[string]any{}
-		}
-		if _, taken := col.Extra[key]; !taken {
-			col.Extra[key] = v
-		}
-	}
+	col.Extra = dbt.MergeExtra(col.Extra, c.Extra, cfg.ExtraKeys, false)
 
 	if labels.Routed() {
 		// Into the manifest column, so a label travels downstream exactly as a
@@ -150,10 +138,7 @@ func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	if c.Sources == nil {
 		c.Sources = map[string]*dbt.CatalogNode{}
 	}
-	if _, exists := c.Sources[n.UniqueID]; exists {
-		return
-	}
-	if _, exists := c.Nodes[n.UniqueID]; exists {
+	if c.Sources[n.UniqueID] != nil || c.Nodes[n.UniqueID] != nil {
 		return
 	}
 	c.Sources[n.UniqueID] = entry
@@ -256,7 +241,8 @@ func filterLabels(labels map[string]string, l config.ResolvedLabels) (map[string
 
 func anyMatch(patterns []string, key string) bool {
 	for _, p := range patterns {
-		if ok, err := path.Match(strings.ToLower(p), strings.ToLower(key)); err == nil && ok {
+		// Unlike a provider's match block, an empty pattern here means nothing.
+		if p != "" && globMatch(p, key) {
 			return true
 		}
 	}

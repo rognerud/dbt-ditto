@@ -34,24 +34,8 @@ if [[ $# -gt 0 ]]; then
   VERSIONS=("$@")
 fi
 
-# Locate uv by running it: a sandbox may allow exec while denying stat on the
-# directory holding it, which makes `command -v` lie.
-find_uv() {
-  local candidate
-  for candidate in "${UV:-}" uv "${HOME}/.local/bin/uv" /opt/homebrew/bin/uv \
-                   /usr/local/bin/uv "${HOME}/.cargo/bin/uv"; do
-    [[ -n "${candidate}" ]] || continue
-    if "${candidate}" --version >/dev/null 2>&1; then
-      printf '%s' "${candidate}"
-      return 0
-    fi
-  done
-  return 1
-}
-UV="$(find_uv)" || {
-  echo "error: uv not found; install it (https://docs.astral.sh/uv/) or set UV=/path/to/uv" >&2
-  exit 1
-}
+# shellcheck source=lib/uv.sh
+source "${ROOT}/scripts/lib/uv.sh"
 
 built=()
 skipped=()
@@ -72,6 +56,27 @@ scratch_home() {
   cp -R "$2" "$3"
   export HOME="${WORK}/home-$1"
   mkdir -p "${HOME}"
+}
+
+# start_row reads the `core:adapter:python` entry into the per-row variables every
+# section below uses, and prints the header.
+# Usage: start_row ADAPTER ID_PREFIX DIR_PREFIX [NOTE]
+start_row() {
+  IFS=: read -r core adapter python <<<"${entry}"
+  python="${python:-3.12}"
+  id="$2-core${core}"
+  env_dir="${WORK}/env-$3${core}"
+  run_dir="${WORK}/run-$3${core}"
+  log="${WORK}/${id}.log"
+  printf '==> dbt-core %s with dbt-%s %s on Python %s%s\n' \
+    "${core}" "$1" "${adapter}" "${python}" "${4:-}"
+}
+
+# skip_row records a row that could not be built, and points at its log.
+# Usage: skip_row DETAIL TAG
+skip_row() {
+  echo "    skipped: $1 (see ${log})"
+  skipped+=("${entry} ($2)")
 }
 
 meta_field() { # ENV_DIR MANIFEST FIELD
@@ -124,21 +129,16 @@ for entry in "${VERSIONS[@]}"; do
     adapter="$("${env_dir}/bin/python" -c \
       'import importlib.metadata as m; print(m.version("dbt-duckdb"))')"
     printf '==> local environment: dbt-core %s with dbt-duckdb %s\n' "${core}" "${adapter}"
+    id="duckdb-core${core}"
+    run_dir="${WORK}/run-${core}"
+    log="${WORK}/${id}.log"
   else
-    IFS=: read -r core adapter python <<<"${entry}"
-    python="${python:-3.12}"
-    env_dir="${WORK}/env-${core}"
-    printf '==> dbt-core %s with dbt-duckdb %s on Python %s\n' "${core}" "${adapter}" "${python}"
+    start_row duckdb duckdb ""
   fi
-
-  id="duckdb-core${core}"
-  run_dir="${WORK}/run-${core}"
-  log="${WORK}/${id}.log"
 
   if [[ "${entry}" != "local" ]] &&
      ! make_env "${env_dir}" "${python}" "${log}" "dbt-core==${core}" "dbt-duckdb==${adapter}"; then
-    echo "    skipped: could not install (see ${log})"
-    skipped+=("${entry} (install)")
+    skip_row "could not install" install
     continue
   fi
 
@@ -146,8 +146,7 @@ for entry in "${VERSIONS[@]}"; do
   export DBT_DITTO_MATRIX_DB="${run_dir}/matrix.duckdb"
 
   if ! (dbt_build "${env_dir}" "${run_dir}") >>"${log}" 2>&1; then
-    echo "    skipped: dbt failed (see ${log})"
-    skipped+=("${entry} (dbt)")
+    skip_row "dbt failed" dbt
     continue
   fi
 
@@ -169,19 +168,11 @@ if [[ -n "${SKIP_SNOWFLAKE:-}" ]]; then
 fi
 
 for entry in ${SNOWFLAKE[@]+"${SNOWFLAKE[@]}"}; do
-  IFS=: read -r core adapter python <<<"${entry}"
-  id="snowflake-core${core}"
-  env_dir="${WORK}/env-sf-${core}"
-  run_dir="${WORK}/run-sf-${core}"
-  log="${WORK}/${id}.log"
-
-  printf '==> dbt-core %s with dbt-snowflake %s on Python %s (via fakesnow)\n' \
-    "${core}" "${adapter}" "${python}"
+  start_row snowflake snowflake sf- " (via fakesnow)"
 
   if ! make_env "${env_dir}" "${python}" "${log}" \
        "dbt-core==${core}" "dbt-snowflake==${adapter}" fakesnow; then
-    echo "    skipped: could not install (see ${log})"
-    skipped+=("${entry} (snowflake install)")
+    skip_row "could not install" "snowflake install"
     continue
   fi
 
@@ -195,8 +186,7 @@ for entry in ${SNOWFLAKE[@]+"${SNOWFLAKE[@]}"}; do
         "${ROOT}/scripts/lib/dbt_fakesnow.py" "${WORK}/sf-db-${core}" ${cmd} --quiet
     done
   ) >>"${log}" 2>&1; then
-    echo "    skipped: dbt failed (see ${log})"
-    skipped+=("${entry} (snowflake dbt)")
+    skip_row "dbt failed" "snowflake dbt"
     continue
   fi
 
@@ -241,19 +231,11 @@ if [[ ${#POSTGRES[@]} -gt 0 ]] && ! docker info >/dev/null 2>&1; then
 fi
 
 for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
-  IFS=: read -r core adapter python <<<"${entry}"
-  id="postgres-core${core}"
-  env_dir="${WORK}/env-pg-${core}"
-  run_dir="${WORK}/run-pg-${core}"
-  log="${WORK}/${id}.log"
-
-  printf '==> dbt-core %s with dbt-postgres %s on Python %s (in Docker)\n' \
-    "${core}" "${adapter}" "${python}"
+  start_row postgres postgres pg- " (in Docker)"
 
   if ! make_env "${env_dir}" "${python}" "${log}" \
        "dbt-core==${core}" "dbt-postgres==${adapter}"; then
-    echo "    skipped: could not install (see ${log})"
-    skipped+=("${entry} (postgres install)")
+    skip_row "could not install" "postgres install"
     continue
   fi
 
@@ -263,8 +245,7 @@ for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
        -e POSTGRES_USER=dbt-ditto -e POSTGRES_PASSWORD=dbt-ditto \
        -e POSTGRES_DB=dbt-ditto \
        -p "${PG_PORT}:5432" postgres:16-alpine >>"${log}" 2>&1; then
-    echo "    skipped: could not start the container (see ${log})"
-    skipped+=("${entry} (postgres container)")
+    skip_row "could not start the container" "postgres container"
     continue
   fi
 
@@ -278,8 +259,7 @@ for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
     sleep 1
   done
   if [[ ${ready} -eq 0 ]]; then
-    echo "    skipped: Postgres never became ready (see ${log})"
-    skipped+=("${entry} (postgres ready)")
+    skip_row "Postgres never became ready" "postgres ready"
     stop_postgres
     continue
   fi
@@ -289,8 +269,7 @@ for entry in ${POSTGRES[@]+"${POSTGRES[@]}"}; do
   export DBT_DITTO_PG_PORT="${PG_PORT}"
 
   if ! (dbt_build "${env_dir}" "${run_dir}") >>"${log}" 2>&1; then
-    echo "    skipped: dbt failed (see ${log})"
-    skipped+=("${entry} (postgres dbt)")
+    skip_row "dbt failed" "postgres dbt"
     stop_postgres
     continue
   fi
@@ -314,19 +293,11 @@ if [[ -n "${SKIP_BIGQUERY:-}" ]]; then
 fi
 
 for entry in ${BIGQUERY[@]+"${BIGQUERY[@]}"}; do
-  IFS=: read -r core adapter python <<<"${entry}"
-  id="bigquery-core${core}"
-  env_dir="${WORK}/env-bq-${core}"
-  run_dir="${WORK}/run-bq-${core}"
-  log="${WORK}/${id}.log"
-
-  printf '==> dbt-core %s with dbt-bigquery %s on Python %s (parse only)\n' \
-    "${core}" "${adapter}" "${python}"
+  start_row bigquery bigquery bq- " (parse only)"
 
   if ! make_env "${env_dir}" "${python}" "${log}" \
        "dbt-core==${core}" "dbt-bigquery==${adapter}"; then
-    echo "    skipped: could not install (see ${log})"
-    skipped+=("${entry} (bigquery install)")
+    skip_row "could not install" "bigquery install"
     continue
   fi
 
@@ -339,8 +310,7 @@ for entry in ${BIGQUERY[@]+"${BIGQUERY[@]}"}; do
     DBT_PROFILES_DIR="${run_dir}" "${env_dir}/bin/python" \
       "${ROOT}/scripts/lib/dbt_fakebq.py" http://127.0.0.1:9050 parse --quiet
   ) >>"${log}" 2>&1; then
-    echo "    skipped: dbt parse failed (see ${log})"
-    skipped+=("${entry} (bigquery parse)")
+    skip_row "dbt parse failed" "bigquery parse"
     continue
   fi
 

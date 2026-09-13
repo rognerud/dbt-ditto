@@ -1,7 +1,6 @@
 package inherit
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/rognerud/dbt-ditto/internal/config"
@@ -18,25 +17,6 @@ const (
 	// not something this tool should do quietly.
 	WarnLabelConflict = "label_conflict"
 )
-
-// copyExtra takes the configured keys off a column, and nothing else.
-func copyExtra(extra map[string]any, keys []string) map[string]any {
-	if len(extra) == 0 || len(keys) == 0 {
-		return nil
-	}
-	var out map[string]any
-	for _, k := range keys {
-		v, ok := extra[k]
-		if !ok || v == nil {
-			continue
-		}
-		if out == nil {
-			out = make(map[string]any, len(keys))
-		}
-		out[k] = v
-	}
-	return out
-}
 
 // labelKey is the meta key provider labels live under, or empty when they are
 // flattened, ignored, or routed only to tags.
@@ -65,11 +45,9 @@ func (r *Resolver) carryLabels(k *knowledge, from *dbt.Node, rest []*dbt.Node,
 		case config.AggregatesIgnore:
 			return false
 		default: // AggregatesWarn
-			k.notes = append(k.notes, Warning{
-				Column: name, Kind: WarnLabelAggregate,
-				Detail: fmt.Sprintf("derives from a labelled column on %s; the labels were not carried across, because aggregating a value does not preserve what was said about it",
-					from.UniqueID),
-			})
+			k.note(name, WarnLabelAggregate,
+				"derives from a labelled column on %s; the labels were not carried across, because aggregating a value does not preserve what was said about it",
+				from.UniqueID)
 			return false
 		}
 	}
@@ -81,11 +59,9 @@ func (r *Resolver) carryLabels(k *knowledge, from *dbt.Node, rest []*dbt.Node,
 		case config.ConflictNone:
 			return false
 		default: // ConflictWarn
-			k.notes = append(k.notes, Warning{
-				Column: name, Kind: WarnLabelConflict,
-				Detail: fmt.Sprintf("%s and %s label this column differently; nothing was written, because choosing between them alphabetically is not a decision this tool can make",
-					from.UniqueID, dissent),
-			})
+			k.note(name, WarnLabelConflict,
+				"%s and %s label this column differently; nothing was written, because choosing between them alphabetically is not a decision this tool can make",
+				from.UniqueID, dissent)
 			return false
 		}
 	}
@@ -101,25 +77,16 @@ func (r *Resolver) labelDissent(rest []*dbt.Node, name string, keys [matchNone][
 	if key == "" {
 		return "", false
 	}
-	m := r.matcher()
-	for _, a := range rest {
-		c, _, ok := m.find(a, name, keys)
-		if !ok || c == nil {
-			continue
+	dissent := ""
+	r.eachMatch(rest, name, keys, func(a *dbt.Node, c *dbt.Column) bool {
+		v, ok := c.EffectiveMeta().Get(key)
+		if ok && !sameLabels(v, won) {
+			dissent = a.UniqueID
+			return false
 		}
-		meta := c.EffectiveMeta()
-		if meta == nil {
-			continue
-		}
-		v, ok := meta.Get(key)
-		if !ok {
-			continue
-		}
-		if !sameLabels(v, won) {
-			return a.UniqueID, true
-		}
-	}
-	return "", false
+		return true
+	})
+	return dissent, dissent != ""
 }
 
 // sameLabels compares two label maps by content, since they arrive as

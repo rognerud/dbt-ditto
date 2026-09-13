@@ -102,16 +102,21 @@ def normalise_version(raw: str) -> str:
     return version
 
 
-def git_version() -> str:
+def git(*args: str, default: str = "") -> str:
+    """Ask git about the repository, falling back when it cannot answer."""
     try:
-        described = subprocess.run(
-            ["git", "-C", str(ROOT), "describe", "--tags", "--always", "--dirty"],
+        return subprocess.run(
+            ["git", "-C", str(ROOT), *args],
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        described = ""
+        return default
+
+
+def git_version() -> str:
+    described = git("describe", "--tags", "--always", "--dirty")
     if not described or not re.match(r"^v?[0-9]", described):
         # No tags yet: a development version that PyPI would accept but that
         # sorts below any real release.
@@ -120,15 +125,7 @@ def git_version() -> str:
 
 
 def git_commit() -> str:
-    try:
-        return subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "-q", "--verify", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+    return git("rev-parse", "-q", "--verify", "HEAD", default="unknown")
 
 
 def build_binary(target: Target, version: str, commit: str, out_dir: Path) -> Path:

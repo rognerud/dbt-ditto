@@ -19,13 +19,14 @@ type Graph struct {
 	byName map[string][]*dbt.Node
 	parent map[string][]string
 
-	genMu sync.Mutex
-	gens  map[string][][]*dbt.Node
+	child     map[string][]string
+	childOnce sync.Once
 
-	child      map[string][]string
-	childOnce  sync.Once
-	descMu     sync.Mutex
-	descendant map[string][][]*dbt.Node
+	// walks memoises Generations and Descendants, which a wide DAG asks for
+	// repeatedly, keyed by direction and node.
+	walkMu sync.Mutex
+	gens   map[string][][]*dbt.Node
+	desc   map[string][][]*dbt.Node
 }
 
 // BuildGraph merges the projects into a single graph. Projects are listed
@@ -36,6 +37,7 @@ func BuildGraph(projects []*dbt.Project) *Graph {
 		byName:   make(map[string][]*dbt.Node),
 		parent:   make(map[string][]string),
 		gens:     make(map[string][][]*dbt.Node),
+		desc:     make(map[string][][]*dbt.Node),
 	}
 
 	for _, p := range projects {
@@ -134,13 +136,18 @@ const maxGenerations = 100
 // Generations returns the node's ancestors grouped by distance, nearest first, each
 // group sorted by unique_id.
 func (g *Graph) Generations(id string) [][]*dbt.Node {
-	g.genMu.Lock()
-	defer g.genMu.Unlock()
-	if cached, ok := g.gens[id]; ok {
+	return g.cachedLevels(id, g.parent, g.gens)
+}
+
+// cachedLevels answers a levels walk from the cache, walking only once per node.
+func (g *Graph) cachedLevels(id string, adj map[string][]string, cache map[string][][]*dbt.Node) [][]*dbt.Node {
+	g.walkMu.Lock()
+	defer g.walkMu.Unlock()
+	if cached, ok := cache[id]; ok {
 		return cached
 	}
-	out := g.levels(id, g.parent)
-	g.gens[id] = out
+	out := g.levels(id, adj)
+	cache[id] = out
 	return out
 }
 
@@ -197,18 +204,7 @@ func (g *Graph) Descendants(id string) [][]*dbt.Node {
 		}
 	})
 
-	g.descMu.Lock()
-	defer g.descMu.Unlock()
-	if cached, ok := g.descendant[id]; ok {
-		return cached
-	}
-
-	out := g.levels(id, g.child)
-	if g.descendant == nil {
-		g.descendant = map[string][][]*dbt.Node{}
-	}
-	g.descendant[id] = out
-	return out
+	return g.cachedLevels(id, g.child, g.desc)
 }
 
 // Ancestors is a flattened Generations, for callers that do not care which

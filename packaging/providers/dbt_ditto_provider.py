@@ -5,10 +5,20 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Iterable
 
 CONTRACT_VERSION = 1
+
+
+def _set(**fields: Any) -> dict[str, Any]:
+    """Keep the fields that carry something: the wire format omits the rest."""
+    return {k: v for k, v in fields.items() if v}
+
+
+def _from_json(cls, raw: dict[str, Any]):
+    """Build a dataclass from a JSON object, defaulting every field to empty."""
+    return cls(**{f.name: raw.get(f.name, "") for f in fields(cls)})
 
 
 @dataclass
@@ -49,18 +59,13 @@ class Column:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"name": self.name}
-        if self.data_type:
-            out["data_type"] = self.data_type
-        if self.description:
-            out["description"] = self.description
-        if self.index:
-            out["index"] = self.index
-        if self.labels:
-            out["labels"] = self.labels
-        if self.extra:
-            out["extra"] = self.extra
-        return out
+        return {"name": self.name} | _set(
+            data_type=self.data_type,
+            description=self.description,
+            index=self.index,
+            labels=self.labels,
+            extra=self.extra,
+        )
 
 
 @dataclass
@@ -71,14 +76,11 @@ class Doc:
     columns: list[Column] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"unique_id": self.unique_id}
-        if self.description:
-            out["description"] = self.description
-        if self.labels:
-            out["labels"] = self.labels
-        if self.columns:
-            out["columns"] = [c.to_json() for c in self.columns]
-        return out
+        return {"unique_id": self.unique_id} | _set(
+            description=self.description,
+            labels=self.labels,
+            columns=[c.to_json() for c in self.columns],
+        )
 
 
 @dataclass
@@ -102,29 +104,12 @@ def read_request(stream=None) -> Request:
         raise SystemExit(
             f"request speaks contract version {version}, this provider understands {CONTRACT_VERSION}"
         )
-    projects = {
-        p["name"]: Project(
-            name=p.get("name", ""),
-            root=p.get("root", ""),
-            profile=p.get("profile", ""),
-            target=p.get("target", ""),
-            profiles_dir=p.get("profiles_dir", ""),
-        )
-        for p in raw.get("projects") or []
-    }
-    sources = [
-        Source(
-            unique_id=s["unique_id"],
-            database=s.get("database", ""),
-            schema=s.get("schema", ""),
-            identifier=s.get("identifier", ""),
-            source_name=s.get("source_name", ""),
-            name=s.get("name", ""),
-            project=s.get("project", ""),
-        )
-        for s in raw.get("sources") or []
-    ]
-    return Request(projects=projects, sources=sources)
+    return Request(
+        projects={
+            p["name"]: _from_json(Project, p) for p in raw.get("projects") or []
+        },
+        sources=[_from_json(Source, s) for s in raw.get("sources") or []],
+    )
 
 
 def each_project(request: Request, adapter: str, warnings: list[str]):

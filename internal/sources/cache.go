@@ -67,10 +67,7 @@ func Load(path string) (*Set, error) {
 	set := &Set{Docs: make(map[string]*Doc, len(f.Sources)), Warnings: f.Warnings}
 	for i := range f.Sources {
 		d := f.Sources[i]
-		if d.UniqueID == "" {
-			continue
-		}
-		set.Docs[d.UniqueID] = &d
+		set.add(&d)
 	}
 	return set, nil
 }

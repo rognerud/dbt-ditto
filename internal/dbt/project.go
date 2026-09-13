@@ -80,9 +80,7 @@ func LoadProject(root, targetDir string, writable bool) (*Project, error) {
 		Writable: writable,
 		Profile:  py.ProfileName,
 	}
-	if p.Name == "" {
-		p.Name = man.Metadata.ProjectName
-	}
+	p.claim()
 
 	// A missing catalog is normal: `dbt docs generate` may not have been run, and
 	// inheritance still works from the manifest.
@@ -103,13 +101,15 @@ func LoadProject(root, targetDir string, writable bool) (*Project, error) {
 		}
 		collectPathRules(section, nil, &p.pathRules)
 	}
-
-	p.claim()
 	return p, nil
 }
 
-// claim points every node of the project's manifest back at it.
+// claim names the project after its manifest when dbt_project.yml did not, and
+// points every node of that manifest back at it.
 func (p *Project) claim() {
+	if p.Name == "" {
+		p.Name = p.Manifest.Metadata.ProjectName
+	}
 	for _, m := range []map[string]*Node{p.Manifest.Nodes, p.Manifest.Sources} {
 		for _, n := range m {
 			n.Project = p
@@ -134,9 +134,6 @@ func LoadManifestOnly(name, manifestPath string) (*Project, error) {
 		Manifest:     man,
 		Writable:     false,
 		ManifestOnly: true,
-	}
-	if p.Name == "" {
-		p.Name = man.Metadata.ProjectName
 	}
 	p.claim()
 	return p, nil

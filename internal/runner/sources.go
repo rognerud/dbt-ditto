@@ -12,8 +12,7 @@ import (
 
 // applySources documents the external sources from the provider cache, refreshing it
 // first when asked.
-func applySources(cfg *config.Config, resolved config.Resolved, graph *inherit.Graph, opts Options) ([]string, error) {
-	external, _ := graph.ClassifySources()
+func applySources(cfg *config.Config, resolved config.Resolved, external []*dbt.Node, opts Options) ([]string, error) {
 	if len(external) == 0 {
 		return nil, nil
 	}
@@ -75,8 +74,7 @@ func sourceProviders(cfg *config.Config) []sources.Provider {
 // shadowedSourceWarnings reports a `source:` pointing at a relation a loaded project
 // builds: a DAG root inheriting nothing, standing in front of a documented model, which
 // almost always wants to be a cross-project ref.
-func shadowedSourceWarnings(graph *inherit.Graph, targets []*dbt.Node) []inherit.Warning {
-	_, shadowed := graph.ClassifySources()
+func shadowedSourceWarnings(shadowed []inherit.ShadowedSource, targets []*dbt.Node) []inherit.Warning {
 	if len(shadowed) == 0 {
 		return nil
 	}

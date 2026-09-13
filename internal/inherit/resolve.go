@@ -70,11 +70,14 @@ const (
 )
 
 // Warning is one thing the run wants to say about a column without failing.
-type Warning struct {
-	Node   string
-	Column string
-	Kind   string
-	Detail string
+type Warning struct{ Node, Column, Kind, Detail string }
+
+// warn records something the run wants to say about a column without failing.
+func (d *NodeDoc) warn(column, kind, format string, args ...any) {
+	d.Warnings = append(d.Warnings, Warning{
+		Node: d.Node.UniqueID, Column: column, Kind: kind,
+		Detail: fmt.Sprintf(format, args...),
+	})
 }
 
 // Changed reports whether the resolution asks for any edit at all.
@@ -112,10 +115,9 @@ func (r *Resolver) matcher() *matcher {
 
 // ExistingColumn is the state of a column as currently written in YAML.
 type ExistingColumn struct {
-	Name        string
-	Description string
-	Meta        []MetaEntry
-	Tags        []string
+	Name, Description string
+	Meta              []MetaEntry
+	Tags              []string
 }
 
 // Existing is the current YAML state of a node, read from the schema file.
@@ -136,6 +138,14 @@ type knowledge struct {
 	// notes are warnings raised while folding ancestors in (labels dropped or
 	// disagreed about); inheritInto walks generations, Resolve owns the list.
 	notes []Warning
+}
+
+// note records a warning about the column being folded together; Resolve fills
+// in the node it belongs to.
+func (k *knowledge) note(column, kind, format string, args ...any) {
+	k.notes = append(k.notes, Warning{
+		Column: column, Kind: kind, Detail: fmt.Sprintf(format, args...),
+	})
 }
 
 // Resolve computes the documentation for a node given what its YAML file says
@@ -201,16 +211,12 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		local := k.description
 
 		// A directive says where the description lives; resolve it first.
-		directive, hasDirective := parseDirective(local, r.Cfg.DirectivePrefix, r.Cfg.Directives)
 		var directiveDesc, directiveFrom string
-		if hasDirective {
+		if directive, ok := r.parseDirective(local); ok {
 			var err string
 			directiveDesc, directiveFrom, err = r.followDirective(directive)
 			if err != "" {
-				doc.Warnings = append(doc.Warnings, Warning{
-					Node: n.UniqueID, Column: t.name, Kind: WarnDirective,
-					Detail: fmt.Sprintf("%q %s", directive, err),
-				})
+				doc.warn(t.name, WarnDirective, "%q %s", directive, err)
 			}
 		}
 
@@ -226,11 +232,8 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 		// competing also feeds the meta annotation below, so gate the warning here.
 		if len(competing) > 0 && r.Cfg.WarnAmbiguous {
-			doc.Warnings = append(doc.Warnings, Warning{
-				Node: n.UniqueID, Column: t.name, Kind: WarnAmbiguous,
-				Detail: fmt.Sprintf("documented differently by %s; took %s",
-					strings.Join(competing, ", "), progenitor),
-			})
+			doc.warn(t.name, WarnAmbiguous, "documented differently by %s; took %s",
+				strings.Join(competing, ", "), progenitor)
 		}
 
 		if k.description == "" && r.backfills(n) {
@@ -349,7 +352,7 @@ func (r *Resolver) seedKnowledge(n *dbt.Node, name string, ex *ExistingColumn) k
 			k.meta = m.Clone()
 		}
 		k.tags = append(k.tags, mc.EffectiveTags()...)
-		k.extra = copyExtra(mc.Extra, r.Cfg.ExtraKeys)
+		k.extra = dbt.MergeExtra(nil, mc.Extra, r.Cfg.ExtraKeys, true)
 		return k
 	}
 	if ex != nil {
@@ -380,16 +383,7 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 			if r.Cfg.InheritTags {
 				k.tags = dbt.UnionTags(k.tags, c.EffectiveTags())
 			}
-			for _, ek := range r.Cfg.ExtraKeys {
-				v, ok := c.Extra[ek]
-				if !ok || v == nil {
-					continue
-				}
-				if k.extra == nil {
-					k.extra = map[string]any{}
-				}
-				k.extra[ek] = v
-			}
+			k.extra = dbt.MergeExtra(k.extra, c.Extra, r.Cfg.ExtraKeys, true)
 			if r.Cfg.InheritMeta {
 				labelKey := r.labelKey()
 				em := c.EffectiveMeta()
@@ -434,24 +428,37 @@ func (r *Resolver) dissenters(rest []*dbt.Node, name string, keys [matchNone][]s
 	if !r.Cfg.WarnAmbiguous && !r.Cfg.AmbiguityMeta {
 		return nil
 	}
-	m := r.matcher()
 	var out []string
+	r.eachMatch(rest, name, keys, func(a *dbt.Node, c *dbt.Column) bool {
+		if c.Description != "" && !r.Cfg.IsPlaceholder(c.Description) && c.Description != won {
+			out = append(out, a.UniqueID)
+		}
+		return true
+	})
+	return out
+}
+
+// eachMatch calls fn for every node in rest that has the column, stopping early
+// when fn returns false.
+func (r *Resolver) eachMatch(rest []*dbt.Node, name string, keys [matchNone][]string,
+	fn func(*dbt.Node, *dbt.Column) bool) {
+
+	m := r.matcher()
 	for _, a := range rest {
 		c, _, ok := m.find(a, name, keys)
 		if !ok || c == nil {
 			continue
 		}
-		if c.Description == "" || r.Cfg.IsPlaceholder(c.Description) || c.Description == won {
-			continue
+		if !fn(a, c) {
+			return
 		}
-		out = append(out, a.UniqueID)
 	}
-	return out
 }
 
-// parseDirective reads `Inherited: model.column` out of a description.
-func parseDirective(description, prefix string, enabled bool) (string, bool) {
-	if !enabled || prefix == "" {
+// parseDirective reads the `model.column` out of an `Inherited: …` description.
+func (r *Resolver) parseDirective(description string) (string, bool) {
+	prefix := r.Cfg.DirectivePrefix
+	if !r.Cfg.Directives || prefix == "" {
 		return "", false
 	}
 	trimmed := strings.TrimSpace(description)

@@ -74,6 +74,20 @@ type Set struct {
 	Warnings []string
 }
 
+// add files one relation's documentation, reporting whether it was the first
+// answer for that node: later ones, from another provider or a stale cache
+// entry, are kept out.
+func (s *Set) add(d *Doc) bool {
+	if d.UniqueID == "" {
+		return false
+	}
+	if _, taken := s.Docs[d.UniqueID]; taken {
+		return false
+	}
+	s.Docs[d.UniqueID] = d
+	return true
+}
+
 // Lookup returns the documentation for a node, if any provider had some.
 func (s *Set) Lookup(uniqueID string) (*Doc, bool) {
 	if s == nil || len(s.Docs) == 0 {

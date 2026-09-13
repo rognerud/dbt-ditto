@@ -29,20 +29,33 @@ func readExisting(f *yamlfile.File, n *dbt.Node) inherit.Existing {
 		Description: yamlfile.StringOf(yamlfile.MapGet(entry, "description")),
 		Meta:        readMeta(entry),
 	}
-	if cols := yamlfile.MapGet(entry, "columns"); cols != nil && cols.Kind == yaml.SequenceNode {
-		for _, c := range cols.Content {
-			if c.Kind != yaml.MappingNode {
-				continue
-			}
-			ex.Columns = append(ex.Columns, inherit.ExistingColumn{
-				Name:        yamlfile.StringOf(yamlfile.MapGet(c, "name")),
-				Description: yamlfile.StringOf(yamlfile.MapGet(c, "description")),
-				Meta:        readMeta(c),
-				Tags:        readTags(c),
-			})
+	eachColumn(entry, func(c *yaml.Node) {
+		ex.Columns = append(ex.Columns, inherit.ExistingColumn{
+			Name:        columnName(c),
+			Description: yamlfile.StringOf(yamlfile.MapGet(c, "description")),
+			Meta:        readMeta(c),
+			Tags:        readTags(c),
+		})
+	})
+	return ex
+}
+
+// eachColumn calls fn for every column mapping of an entry, in file order.
+func eachColumn(entry *yaml.Node, fn func(*yaml.Node)) {
+	cols := yamlfile.MapGet(entry, "columns")
+	if cols == nil || cols.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, c := range cols.Content {
+		if c.Kind == yaml.MappingNode {
+			fn(c)
 		}
 	}
-	return ex
+}
+
+// columnName is the `name:` a column entry is written under.
+func columnName(c *yaml.Node) string {
+	return yamlfile.StringOf(yamlfile.MapGet(c, "name"))
 }
 
 // readMeta reads `meta:` and `config.meta:` off an entry, in that order, so
@@ -108,15 +121,10 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 
 	existingCols := map[string]*yaml.Node{}
 	var existingOrder []*yaml.Node
-	if cols := yamlfile.MapGet(entry, "columns"); cols != nil && cols.Kind == yaml.SequenceNode {
-		for _, c := range cols.Content {
-			if c.Kind != yaml.MappingNode {
-				continue
-			}
-			existingOrder = append(existingOrder, c)
-			existingCols[opts.cfg.Fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")))] = c
-		}
-	}
+	eachColumn(entry, func(c *yaml.Node) {
+		existingOrder = append(existingOrder, c)
+		existingCols[opts.cfg.Fold(columnName(c))] = c
+	})
 
 	dropped := map[string]bool{}
 	for _, d := range doc.Drop {
@@ -163,7 +171,7 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 			yamlfile.MapSet(node, e.Key, v)
 		}
 		// dbt-osmosis rebuilds each column entry and always ends it with the config block.
-		moveKeyLast(node, "config")
+		yamlfile.MoveLast(node, "config")
 
 		newSeq.Content = append(newSeq.Content, node)
 	}
@@ -171,12 +179,12 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 	// Anything the resolver neither kept nor dropped stays put, so disabling
 	// remove_stale really does leave columns alone.
 	for _, c := range existingOrder {
-		key := opts.cfg.Fold(yamlfile.StringOf(yamlfile.MapGet(c, "name")))
+		key := opts.cfg.Fold(columnName(c))
 		if kept[key] {
 			continue
 		}
 		if dropped[key] {
-			changes = append(changes, fmt.Sprintf("- column %s", yamlfile.StringOf(yamlfile.MapGet(c, "name"))))
+			changes = append(changes, fmt.Sprintf("- column %s", columnName(c)))
 			continue
 		}
 		newSeq.Content = append(newSeq.Content, c)
@@ -252,25 +260,6 @@ func setTags(entry *yaml.Node, tags []string, configBlock bool) {
 		seq.Content = append(seq.Content, yamlfile.Scalar(t))
 	}
 	yamlfile.MapSet(holder, "tags", seq)
-}
-
-// moveKeyLast shifts a key, and its value, to the end of a mapping, leaving the
-func moveKeyLast(m *yaml.Node, key string) {
-	if m == nil || m.Kind != yaml.MappingNode {
-		return
-	}
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value != key {
-			continue
-		}
-		if i+2 == len(m.Content) {
-			return // already last
-		}
-		k, v := m.Content[i], m.Content[i+1]
-		m.Content = append(m.Content[:i], m.Content[i+2:]...)
-		m.Content = append(m.Content, k, v)
-		return
-	}
 }
 
 // holderFor clears key from whichever of the entry and its `config:` block does

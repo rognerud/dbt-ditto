@@ -56,9 +56,14 @@ func (c *Config) attachLoomUpstreams() {
 		if !ok {
 			continue
 		}
+		// Every note names the config it is about, so the reader knows which
+		// project's loom setup is being described.
+		note := func(format string, args ...any) {
+			c.Notes = append(c.Notes, Rel(c.Dir, path)+": "+fmt.Sprintf(format, args...))
+		}
 		manifests, err := readLoomConfig(path)
 		if err != nil {
-			c.Notes = append(c.Notes, fmt.Sprintf("%s: %v", rel(c.Dir, path), err))
+			note("%v", err)
 			continue
 		}
 		for _, m := range manifests {
@@ -68,15 +73,13 @@ func (c *Config) attachLoomUpstreams() {
 			// Only `type: file` names something this process can open; the remote types are
 			// loom fetching over the network. Said out loud rather than silently skipped.
 			if !strings.EqualFold(m.Type, "file") {
-				c.Notes = append(c.Notes, fmt.Sprintf(
-					"%s: skipping dbt-loom manifest %q (type %q): only `type: file` is read; download the artifact and add it as `manifest:` in dbt_ditto.yml",
-					rel(c.Dir, path), m.Name, m.Type))
+				note("skipping dbt-loom manifest %q (type %q): only `type: file` is read; download the artifact and add it as `manifest:` in dbt_ditto.yml",
+					m.Name, m.Type)
 				continue
 			}
 			p := os.ExpandEnv(m.Config.Path)
 			if p == "" {
-				c.Notes = append(c.Notes, fmt.Sprintf(
-					"%s: skipping dbt-loom manifest %q: no config.path", rel(c.Dir, path), m.Name))
+				note("skipping dbt-loom manifest %q: no config.path", m.Name)
 				continue
 			}
 			if !filepath.IsAbs(p) {
@@ -84,8 +87,7 @@ func (c *Config) attachLoomUpstreams() {
 				p = filepath.Join(root, p)
 			}
 			if _, err := os.Stat(p); err != nil {
-				c.Notes = append(c.Notes, fmt.Sprintf(
-					"%s: skipping dbt-loom manifest %q: %v", rel(c.Dir, path), m.Name, err))
+				note("skipping dbt-loom manifest %q: %v", m.Name, err)
 				continue
 			}
 			if m.Name != "" {
@@ -127,8 +129,9 @@ func readLoomConfig(path string) ([]loomManifest, error) {
 	return lc.Manifests, nil
 }
 
-// rel shortens a path for a message, falling back to the absolute path when the
-func rel(base, path string) string {
+// Rel shortens a path for a message, falling back to the absolute path when the
+// target is not under base.
+func Rel(base, path string) string {
 	if r, err := filepath.Rel(base, path); err == nil && !strings.HasPrefix(r, "..") {
 		return filepath.ToSlash(r)
 	}

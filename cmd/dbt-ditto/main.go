@@ -28,19 +28,13 @@ func versionString() string {
 			v = info.Main.Version
 		}
 		for _, s := range info.Settings {
-			switch s.Key {
-			case "vcs.revision":
-				if c == "" {
-					c = s.Value
-				}
-			case "vcs.time":
-				if d == "" {
-					d = s.Value
-				}
-			case "vcs.modified":
-				if s.Value == "true" {
-					v += "-dirty"
-				}
+			switch {
+			case s.Key == "vcs.revision" && c == "":
+				c = s.Value
+			case s.Key == "vcs.time" && d == "":
+				d = s.Value
+			case s.Key == "vcs.modified" && s.Value == "true":
+				v += "-dirty"
 			}
 		}
 	}
@@ -101,6 +95,13 @@ Examples:
   dbt-ditto inherit --select 'stg_*,tag:nightly' --verbose
 `
 
+// notes prints remarks about the run, which belong on stderr with the warnings.
+func notes(ns []string) {
+	for _, n := range ns {
+		fmt.Fprintln(os.Stderr, "note:", n)
+	}
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "dbt-ditto:", err)
@@ -130,19 +131,21 @@ func run(args []string) error {
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
-	refresh := fs.Bool("refresh-sources", false, "run the source providers and rewrite the cache")
-	target := fs.String("target", "", "profiles.yml target for source providers")
-	dryRun := fs.Bool("dry-run", false, "report changes without writing")
-	check := fs.Bool("check", false, "exit 1 if any file would change")
-	selectSpec := fs.String("select", "", "node selector")
-	noOrganize := fs.Bool("no-organize", false, "never move a model between files")
-	// The short spellings are aliases, so they share a variable.
-	var cfgPath string
-	var verbose bool
+	// Bound straight into the options the runner takes, so no flag is copied twice.
+	// The short spellings are aliases, and share their variable.
+	var opts runner.Options
+	var cfgPath, selectSpec string
+	var noOrganize bool
+	fs.BoolVar(&opts.RefreshSources, "refresh-sources", false, "run the source providers and rewrite the cache")
+	fs.StringVar(&opts.Target, "target", "", "profiles.yml target for source providers")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "report changes without writing")
+	fs.BoolVar(&opts.Check, "check", false, "exit 1 if any file would change")
+	fs.StringVar(&selectSpec, "select", "", "node selector")
+	fs.BoolVar(&noOrganize, "no-organize", false, "never move a model between files")
 	fs.StringVar(&cfgPath, "config", "", "path to dbt_ditto.yml")
 	fs.StringVar(&cfgPath, "c", "", "path to dbt_ditto.yml")
-	fs.BoolVar(&verbose, "verbose", false, "list every change")
-	fs.BoolVar(&verbose, "v", false, "list every change")
+	fs.BoolVar(&opts.Verbose, "verbose", false, "list every change")
+	fs.BoolVar(&opts.Verbose, "v", false, "list every change")
 
 	// Flags may come after the project directory, and Go's flag package stops at
 	// the first non-flag argument, so parsing resumes after each positional:
@@ -176,27 +179,19 @@ func run(args []string) error {
 
 	// Notes are about how the projects were assembled, so they belong before the
 	// run rather than with the per-column warnings it produces.
-	for _, n := range cfg.Notes {
-		fmt.Fprintln(os.Stderr, "note:", n)
-	}
+	notes(cfg.Notes)
 
 	// Refreshing reaches the network and rewrites the cache, which is not something
 	// --check should do: the point of the cache is that CI reads it rather than
 	// dialling out. Asking for both is a mistake worth naming.
-	if *refresh && *check {
+	if opts.RefreshSources && opts.Check {
 		return fmt.Errorf("--refresh-sources and --check are contradictory: --check must not reach the warehouse; refresh first, then check")
 	}
 
-	opts := runner.Options{
-		DryRun:         *dryRun || *check,
-		Check:          *check,
-		Organize:       !*noOrganize,
-		Verbose:        verbose,
-		RefreshSources: *refresh,
-		Target:         *target,
-	}
-	if *selectSpec != "" {
-		opts.Select = strings.Split(*selectSpec, ",")
+	opts.DryRun = opts.DryRun || opts.Check
+	opts.Organize = !noOrganize
+	if selectSpec != "" {
+		opts.Select = strings.Split(selectSpec, ",")
 	}
 
 	rep, err := runner.Run(cfg, opts)
@@ -204,11 +199,9 @@ func run(args []string) error {
 		return err
 	}
 
-	for _, n := range rep.Notes {
-		fmt.Fprintln(os.Stderr, "note:", n)
-	}
+	notes(rep.Notes)
 
-	if verbose {
+	if opts.Verbose {
 		for _, c := range rep.Changes {
 			fmt.Printf("  %s\n    %s: %s\n", c.Node, c.File, c.Detail)
 		}
@@ -242,7 +235,7 @@ func run(args []string) error {
 		fmt.Printf("%d warnings\n", len(rep.Warnings))
 	}
 
-	if *check && (len(rep.FilesWritten) > 0 || len(rep.FilesDeleted) > 0) {
+	if opts.Check && (len(rep.FilesWritten) > 0 || len(rep.FilesDeleted) > 0) {
 		return fmt.Errorf("documentation is out of date")
 	}
 	return nil
