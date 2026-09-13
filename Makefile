@@ -10,7 +10,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse -q --verify HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build test test-short features docs race vet doctor lint lint-fix ruff ruff-fix vuln actionlint pin pin-check zizmor tidy-check scan audit tools bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
+.PHONY: all build test test-short features docs race vet doctor lint lint-fix ruff ruff-fix vuln actionlint pin pin-check pin-update zizmor tidy-check scan audit tools bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
 
 all: vet test build
 
@@ -154,6 +154,15 @@ pin: $(TOOLS)/pinact
 # Unauthenticated the GitHub API allows 60 requests an hour; set GITHUB_TOKEN.
 pin-check: $(TOOLS)/pinact
 	$(TOOLS)/pinact run --check
+
+## pin-update: move every action pin to the newest release, then re-audit
+# The manual half of .github/dependabot.yml, for when a deprecation notice
+# arrives before Monday's pull requests do. It rewrites the SHAs in place, so
+# read the diff: a pin is a review boundary, and `-u` crosses it for every
+# action at once. min_age in .pinact.yaml still applies.
+pin-update: $(TOOLS)/pinact
+	$(TOOLS)/pinact run -u
+	@echo 'Pins updated. Read the diff, then: make actionlint pin-check zizmor'
 
 ## zizmor: audit the workflows for the problems a linter does not look for
 zizmor:
