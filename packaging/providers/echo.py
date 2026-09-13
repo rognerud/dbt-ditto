@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dbt_ditto_provider import Column, Doc, read_request, write_response  # noqa: E402
+from dbt_ditto_provider import Column, Doc, read_request, write_response
 
 
 def main() -> None:
@@ -25,7 +25,9 @@ def main() -> None:
     for source in request.sources:
         answer = answers.get(source.unique_id)
         if answer is None:
-            warnings.append(f"{source.unique_id}: {source.fqn} is not in the answer file")
+            warnings.append(
+                f"{source.unique_id}: {source.fqn} is not in the answer file"
+            )
             continue
         # Asserted rather than assumed: a provider is given the relation to look
         # up, and one that ignored it would document the wrong table.

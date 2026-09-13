@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import dbt_ditto_provider as provider  # noqa: E402
-import snowflake as sf  # noqa: E402
+import dbt_ditto_provider as provider
+import snowflake as sf
 
 
 class TestContract(unittest.TestCase):
@@ -119,7 +119,9 @@ class TestProfiles(unittest.TestCase):
         self.assertIn("SF_WH", str(caught.exception))
 
     def test_an_unknown_profile_says_which_file_was_read(self):
-        d = self.profile_dir("other:\n  target: prod\n  outputs:\n    prod:\n      type: bigquery\n")
+        d = self.profile_dir(
+            "other:\n  target: prod\n  outputs:\n    prod:\n      type: bigquery\n"
+        )
         p = provider.Project("shop", "/repo", "shop", "prod", d)
         with self.assertRaises(SystemExit) as caught:
             provider._load_profile_from_yaml(p)
@@ -163,7 +165,9 @@ class TestBigQueryRendering(unittest.TestCase):
         )
 
     def test_a_repeated_record_is_wrapped_in_array(self):
-        field = Field("items", "RECORD", mode="REPEATED", fields=(Field("sku", "STRING"),))
+        field = Field(
+            "items", "RECORD", mode="REPEATED", fields=(Field("sku", "STRING"),)
+        )
         self.assertEqual(self.bq.render_type(field), "ARRAY<STRUCT<`sku` STRING>>")
 
     def test_numeric_keeps_its_precision(self):
@@ -189,7 +193,13 @@ class TestBigQueryRendering(unittest.TestCase):
         got = self.bq.flatten(fields)
         self.assertEqual(
             [c.name for c in got],
-            ["id", "customer", "customer.first_name", "customer.address", "customer.address.city"],
+            [
+                "id",
+                "customer",
+                "customer.first_name",
+                "customer.address",
+                "customer.address.city",
+            ],
         )
         self.assertEqual([c.index for c in got], [1, 2, 3, 4, 5])
         self.assertEqual(got[2].description, "Given name.")
@@ -207,13 +217,17 @@ class TestBigQueryRendering(unittest.TestCase):
 
 class TestSnowflakeRendering(unittest.TestCase):
     def test_text_is_reported_as_varchar_with_its_length(self):
-        self.assertEqual(sf.render_type("TEXT", 16777216, None, None), "VARCHAR(16777216)")
+        self.assertEqual(
+            sf.render_type("TEXT", 16777216, None, None), "VARCHAR(16777216)"
+        )
 
     def test_number_keeps_precision_and_scale(self):
         self.assertEqual(sf.render_type("NUMBER", None, 38, 0), "NUMBER(38,0)")
 
     def test_a_type_with_nothing_to_add_is_left_alone(self):
-        self.assertEqual(sf.render_type("TIMESTAMP_NTZ", None, None, None), "TIMESTAMP_NTZ")
+        self.assertEqual(
+            sf.render_type("TIMESTAMP_NTZ", None, None, None), "TIMESTAMP_NTZ"
+        )
 
     def test_a_database_name_cannot_end_the_identifier_it_is_quoted_into(self):
         # Identifiers cannot be bound as parameters, so this is the one place a
@@ -280,7 +294,10 @@ class TestSnowflakeSchemaDescription(unittest.TestCase):
 
     def test_unreadable_tags_warn_without_losing_the_comments(self):
         docs, warnings = sf.describe_schema(
-            self.Cursor(self.rows(), tags_fail=True), "ANALYTICS", "RAW", [self.source()]
+            self.Cursor(self.rows(), tags_fail=True),
+            "ANALYTICS",
+            "RAW",
+            [self.source()],
         )
         self.assertEqual(docs[0].description, "Orders as the CRM records them.")
         self.assertEqual(docs[0].labels, {})

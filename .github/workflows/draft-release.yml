@@ -9,7 +9,13 @@ on:
     branches: [main]
   # Re-runs on label changes so the version in the draft reflects a label that
   # was corrected after the fact.
-  pull_request_target:
+  #
+  # pull_request_target is dangerous when a workflow checks out and then executes
+  # the pull request's code, because it runs with write permissions against the
+  # base repository. This one never checks anything out: its single step reads
+  # labels and titles through the API. The trigger is needed because
+  # `pull_request` would have no permission to update the draft at all.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 permissions:

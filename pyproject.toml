@@ -15,3 +15,41 @@ dependencies = [
     "dbt-loom>=0.9.6",
     "dbt-osmosis>=1.5.0",
 ]
+
+[dependency-groups]
+dev = ["ruff>=0.16.7"]
+
+# The Python here is the source providers and the packaging scripts. They are
+# what reaches a warehouse with real credentials, so they get the same treatment
+# as the Go: a linter with its exclusions written down next to the reason.
+[tool.ruff]
+target-version = "py39"
+extend-exclude = [".venv", ".gocache", "dist", "testdata"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import ordering
+    "B",       # bugbear: the mutable-default and loop-variable-capture class
+    "BLE",     # a bare `except Exception` that swallows what it caught
+    "UP",      # syntax superseded by the minimum version above
+    "RUF",     # ruff's own
+    "S",       # bandit: the security checks, since these scripts hold credentials
+]
+ignore = [
+    # Line length is left to the formatter; a long URL in a comment is not a bug.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 is not excused per-file: each provider prepends its own directory to
+# sys.path before importing the shared module, and the `# noqa: E402` at the
+# import says so at the one place someone reading it would ask.
+#
+# S101: a test asserts. RUF012: a stub class standing in for a warehouse object
+# is not a model of one.
+"packaging/providers/test_providers.py" = ["S101", "RUF012"]
+# S603/S607: these scripts exist to run `go` and `git`.
+"packaging/pypi/*.py" = ["S603", "S607"]
+"scripts/lib/*.py" = ["S603", "S607"]

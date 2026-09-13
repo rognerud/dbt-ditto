@@ -138,7 +138,13 @@ func attachCatalog(n *dbt.Node, entry *dbt.CatalogNode) {
 	if c.Sources == nil {
 		c.Sources = map[string]*dbt.CatalogNode{}
 	}
-	if c.Sources[n.UniqueID] != nil || c.Nodes[n.UniqueID] != nil {
+	// A model of the same unique_id is left alone — that is dbt's own output for a
+	// relation this run built, and the provider has nothing to say about it. An
+	// existing *source* entry is replaced: it came from whenever `dbt docs
+	// generate` last ran, while the provider read the warehouse a moment ago, so
+	// it is the older of the two on every field they share and is missing any
+	// column the relation has grown since.
+	if c.Nodes[n.UniqueID] != nil {
 		return
 	}
 	c.Sources[n.UniqueID] = entry

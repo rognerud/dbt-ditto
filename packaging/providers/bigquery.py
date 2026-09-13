@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import sys
 from typing import Any
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
-from dbt_ditto_provider import (  # noqa: E402
+from dbt_ditto_provider import (
     Column,
     Doc,
     Source,
@@ -40,9 +41,12 @@ def client_for(profile: dict[str, Any]):
     elif method == "service-account-json":
         from google.oauth2 import service_account
 
-        credentials = service_account.Credentials.from_service_account_info(
-            profile["keyfile_json"]
-        )
+        # dbt accepts keyfile_json either inline as a mapping or, via env_var, as
+        # the JSON text of one. from_service_account_info only takes the mapping.
+        keyfile = profile["keyfile_json"]
+        if isinstance(keyfile, str):
+            keyfile = json.loads(keyfile)
+        credentials = service_account.Credentials.from_service_account_info(keyfile)
     elif method == "oauth-secrets":
         from google.oauth2.credentials import Credentials
 
@@ -146,7 +150,13 @@ def main() -> None:
     for profile, sources in each_project(request, "bigquery", warnings):
         client = client_for(profile)
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-            for doc, warning in pool.map(lambda s: describe(client, s), sources):
+            # client is bound as a default argument rather than closed over: the
+            # callable outlives this iteration of the loop, and a later project's
+            # client must not be the one an in-flight call reaches for.
+            def fetch(s: Source, c=client):
+                return describe(c, s)
+
+            for doc, warning in pool.map(fetch, sources):
                 if doc is not None:
                     docs.append(doc)
                 if warning:

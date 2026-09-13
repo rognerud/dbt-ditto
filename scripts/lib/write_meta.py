@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Write an artifact meta.json: write_meta.py PATH ADAPTER VER DBT SCHEMA [k=v ...]."""
+
 import json
 import sys
 

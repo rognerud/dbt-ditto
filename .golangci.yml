@@ -93,11 +93,10 @@ linters:
         # G306: schema YAML is source, and is written 0644 like the rest of it.
         - G306
 
-    misspell:
-      # No locale. The prose is British, but dbt's own vocabulary is American —
-      # `materialized` is a config key, not a spelling choice — so only genuine
-      # typos are worth reporting.
-      locale: ""
+    # misspell is deliberately left unconfigured: `locale` only accepts US or UK,
+    # and either one would be wrong here. The prose is British, but dbt's own
+    # vocabulary is American — `materialized` is a config key, not a spelling
+    # choice. With no locale set, only genuine typos are reported.
 
     staticcheck:
       checks:

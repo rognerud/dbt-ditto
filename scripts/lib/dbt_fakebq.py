@@ -47,8 +47,10 @@ def main() -> int:
         from dbt.adapters.bigquery import clients as bq_clients
 
         bq_clients.google.cloud.bigquery.Client = EmulatorClient  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001 - older layouts simply do not have it
-        pass
+    except Exception as err:  # noqa: BLE001 - older layouts simply do not have it
+        print(
+            f"note: dbt.adapters.bigquery.clients not patched ({err})", file=sys.stderr
+        )
 
     from dbt.cli.main import dbtRunner
 

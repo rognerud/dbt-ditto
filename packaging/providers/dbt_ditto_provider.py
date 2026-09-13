@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
-from typing import Any, Iterable
+from typing import Any
 
 CONTRACT_VERSION = 1
 
@@ -105,9 +106,7 @@ def read_request(stream=None) -> Request:
             f"request speaks contract version {version}, this provider understands {CONTRACT_VERSION}"
         )
     return Request(
-        projects={
-            p["name"]: _from_json(Project, p) for p in raw.get("projects") or []
-        },
+        projects={p["name"]: _from_json(Project, p) for p in raw.get("projects") or []},
         sources=[_from_json(Source, s) for s in raw.get("sources") or []],
     )
 

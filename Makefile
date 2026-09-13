@@ -10,7 +10,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse -q --verify HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build test test-short features docs race vet doctor lint lint-fix vuln actionlint tidy-check scan audit tools bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
+.PHONY: all build test test-short features docs race vet doctor lint lint-fix ruff ruff-fix vuln actionlint pin pin-check zizmor tidy-check scan audit tools bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
 
 all: vet test build
 
@@ -56,6 +56,10 @@ GOLANGCI_VERSION  := v2.13.2
 GOVULNCHECK_VERSION := latest
 ACTIONLINT_VERSION  := latest
 TRIVY_VERSION       := latest
+PINACT_VERSION      := v5.0.0
+ZIZMOR_VERSION      := 1.30.1
+# Also spelled in lefthook.yml and .github/workflows/ci.yml.
+RUFF_VERSION        := 0.16.7
 
 $(TOOLS)/golangci-lint: | $(TMPDIR)
 	GOBIN=$(TOOLS) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
@@ -70,8 +74,13 @@ $(TOOLS)/actionlint: | $(TMPDIR)
 $(TOOLS)/trivy: | $(TMPDIR)
 	GOBIN=$(TOOLS) GOEXPERIMENT=jsonv2 go install github.com/aquasecurity/trivy/cmd/trivy@$(TRIVY_VERSION)
 
+# pinact declares a newer Go than this module needs, so let the toolchain fetch
+# the one it asks for rather than pinning this repository to it.
+$(TOOLS)/pinact: | $(TMPDIR)
+	GOBIN=$(TOOLS) GOTOOLCHAIN=auto go install github.com/suzuki-shunsuke/pinact/v5/cmd/pinact@$(PINACT_VERSION)
+
 ## tools: install the linters and scanners into .gocache/tools
-tools: $(TOOLS)/golangci-lint $(TOOLS)/govulncheck $(TOOLS)/actionlint $(TOOLS)/trivy
+tools: $(TOOLS)/golangci-lint $(TOOLS)/govulncheck $(TOOLS)/actionlint $(TOOLS)/trivy $(TOOLS)/pinact
 
 ## doctor: report which optional tools are present, and what is not run without them
 # Every check that can be skipped is skipped silently, so that a missing linter
@@ -82,9 +91,10 @@ doctor:
 	@$(call probe,golangci-lint,make lint and the lefthook pre-push lint job)
 	@$(call probe,govulncheck,make vuln and the lefthook pre-push vulnerability job)
 	@$(call probe,actionlint,make actionlint: the GitHub workflows)
+	@$(call probe,pinact,make pin-check: whether every action ref is pinned and resolves)
 	@$(call probe,trivy,make scan: dependency CVEs in uv.lock plus secrets and misconfiguration)
 	@$(call probe,shellcheck,the lefthook pre-commit shellcheck job)
-	@$(call probe,uv,make providers and make parity and make matrix)
+	@$(call probe,uv,make ruff and make zizmor and make providers and make parity and make matrix)
 	@$(call probe,dbt-osmosis,make parity against the real dbt-osmosis and make bench)
 	@$(call probe,lefthook,every git hook: run make hooks)
 	@echo
@@ -101,7 +111,10 @@ define probe
 endef
 
 ## lint: golangci-lint over everything, configured by .golangci.yml
+# `config verify` first: golangci-lint rejects a setting it does not recognise,
+# and in CI that reads as a linting failure rather than as a typo in the config.
 lint: $(TOOLS)/golangci-lint
+	$(TOOLS)/golangci-lint config verify
 	$(TOOLS)/golangci-lint run ./...
 
 ## lint-fix: the same, applying the fixes it knows how to make
@@ -115,6 +128,40 @@ vuln: $(TOOLS)/govulncheck
 ## actionlint: check the GitHub workflows
 actionlint: $(TOOLS)/actionlint
 	$(TOOLS)/actionlint
+
+## ruff: lint and format-check the source providers and the packaging scripts
+# uvx rather than a dependency group: ruff is a single static binary uv caches,
+# and nothing here imports it.
+ruff:
+	@if command -v uvx >/dev/null 2>&1; then \
+		uvx ruff@$(RUFF_VERSION) check packaging scripts && \
+		uvx ruff@$(RUFF_VERSION) format --check packaging scripts; \
+	else \
+		echo "uvx not installed, skipping (https://docs.astral.sh/uv/)"; \
+	fi
+
+## ruff-fix: the same, applying the fixes and the formatting
+ruff-fix:
+	uvx ruff@$(RUFF_VERSION) check --fix packaging scripts
+	uvx ruff@$(RUFF_VERSION) format packaging scripts
+
+## pin: rewrite every `uses:` in .github/workflows to a commit SHA
+pin: $(TOOLS)/pinact
+	$(TOOLS)/pinact run
+
+## pin-check: fail if an action is unpinned, or names a ref GitHub cannot resolve
+# This is the one that catches `trivy-action@0.28.0`: valid syntax, no such tag.
+# Unauthenticated the GitHub API allows 60 requests an hour; set GITHUB_TOKEN.
+pin-check: $(TOOLS)/pinact
+	$(TOOLS)/pinact run --check
+
+## zizmor: audit the workflows for the problems a linter does not look for
+zizmor:
+	@if command -v uvx >/dev/null 2>&1; then \
+		uvx zizmor==$(ZIZMOR_VERSION) --persona=regular .github/workflows; \
+	else \
+		echo "uvx not installed, skipping (https://docs.astral.sh/uv/)"; \
+	fi
 
 ## tidy-check: fail if go.mod or go.sum is not what the source needs
 tidy-check: | $(TMPDIR)
@@ -136,7 +183,7 @@ scan:
 	fi
 
 ## audit: everything CI checks that is not a test — lint, vulnerabilities, modules, workflows
-audit: doctor lint vuln tidy-check actionlint scan
+audit: doctor lint ruff vuln tidy-check actionlint pin-check zizmor scan
 
 ## bench: time dbt-ditto against the real dbt-osmosis, then scale up synthetically
 bench: | $(TMPDIR)

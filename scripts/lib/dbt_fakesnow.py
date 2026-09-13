@@ -22,8 +22,11 @@ def main() -> int:
 
     # A file-backed database so state survives between the seed, run and docs
     # generate invocations, which are separate processes.
-    with fakesnow.patch(db_path=str(db_path), create_database_on_connect=True,
-                        create_schema_on_connect=True):
+    with fakesnow.patch(
+        db_path=str(db_path),
+        create_database_on_connect=True,
+        create_schema_on_connect=True,
+    ):
         from dbt.cli.main import dbtRunner
 
         result = dbtRunner().invoke(dbt_args)

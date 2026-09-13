@@ -16,7 +16,7 @@ wheels/
 *.out
 *.prof
 coverage.txt
-
+testdata/golden/osmosis-analytics-failure.log
 # dbt run state. Only manifest.json and catalog.json under testdata/*/target are
 # committed; the tests read nothing else dbt writes there.
 .dbt/

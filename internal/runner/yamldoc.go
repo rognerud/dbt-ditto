@@ -3,7 +3,6 @@ package runner
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/rognerud/dbt-ditto/internal/config"
 	"github.com/rognerud/dbt-ditto/internal/dbt"
@@ -27,7 +26,6 @@ func readExisting(f *yamlfile.File, n *dbt.Node) inherit.Existing {
 	}
 	ex := inherit.Existing{
 		Description: yamlfile.StringOf(yamlfile.MapGet(entry, "description")),
-		Meta:        readMeta(entry),
 	}
 	eachColumn(entry, func(c *yaml.Node) {
 		ex.Columns = append(ex.Columns, inherit.ExistingColumn{
@@ -108,13 +106,6 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 		yamlfile.MapSet(entry, "description", yamlfile.Scalar(doc.Description))
 		changes = append(changes, "description inherited from "+doc.DescriptionFrom)
 	}
-	if len(doc.Meta) > 0 {
-		// Node-level meta keeps the top-level shape: dbt-osmosis only moves *column*
-		// meta into a config block.
-		setMeta(entry, doc.Meta, false)
-		changes = append(changes, "meta = "+metaKeys(doc.Meta))
-	}
-
 	if !opts.cfg.InheritColumns {
 		return changes
 	}
@@ -299,12 +290,4 @@ func deleteFromConfig(entry *yaml.Node, key string) {
 	if len(cfg.Content) == 0 {
 		yamlfile.MapDelete(entry, "config")
 	}
-}
-
-func metaKeys(meta []inherit.MetaEntry) string {
-	out := make([]string, 0, len(meta))
-	for _, e := range meta {
-		out = append(out, e.Key)
-	}
-	return strings.Join(out, ",")
 }

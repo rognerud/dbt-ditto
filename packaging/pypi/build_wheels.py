@@ -90,11 +90,16 @@ def normalise_version(raw: str) -> str:
     version = version.removeprefix("v")
     version = version.removesuffix("-dirty")
 
-    match = re.fullmatch(r"(?P<base>.+?)-(?P<distance>\d+)-g(?P<commit>[0-9a-f]+)", version)
+    match = re.fullmatch(
+        r"(?P<base>.+?)-(?P<distance>\d+)-g(?P<commit>[0-9a-f]+)", version
+    )
     if match:
         version = "{base}.post{distance}+g{commit}".format(**match.groupdict())
 
-    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?(\+[a-zA-Z0-9.]+)?", version):
+    if not re.fullmatch(
+        r"[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?(\+[a-zA-Z0-9.]+)?",
+        version,
+    ):
         raise SystemExit(
             f"version {raw!r} is not a valid PEP 440 version (normalised to {version!r}).\n"
             f"Tag the release as e.g. v0.1.0, or pass --version explicitly."
@@ -136,13 +141,26 @@ def build_binary(target: Target, version: str, commit: str, out_dir: Path) -> Pa
         "CGO_ENABLED": "0",
         "GOOS": target.goos,
         "GOARCH": target.goarch,
-        "GOFLAGS": os.environ.get("GOFLAGS", "-mod=vendor"),
+        # No default: the repository resolves dependencies from go.sum against the
+        # module cache and has no vendor/ tree, so forcing -mod=vendor here would
+        # fail every build.
+        "GOFLAGS": os.environ.get("GOFLAGS", ""),
         "GOCACHE": os.environ.get("GOCACHE", str(ROOT / ".gocache" / "go-build")),
+        "GOMODCACHE": os.environ.get("GOMODCACHE", str(ROOT / ".gocache" / "mod")),
         **target.extra_env,
     }
     ldflags = f"-s -w -X main.version={version} -X main.commit={commit}"
     subprocess.run(
-        ["go", "build", "-trimpath", "-ldflags", ldflags, "-o", str(out), "./cmd/dbt-ditto"],
+        [
+            "go",
+            "build",
+            "-trimpath",
+            "-ldflags",
+            ldflags,
+            "-o",
+            str(out),
+            "./cmd/dbt-ditto",
+        ],
         cwd=ROOT,
         env=env,
         check=True,
@@ -196,7 +214,9 @@ def record_hash(data: bytes) -> str:
     return "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def build_wheel(target: Target, version: str, commit: str, out_dir: Path, work: Path) -> Path:
+def build_wheel(
+    target: Target, version: str, commit: str, out_dir: Path, work: Path
+) -> Path:
     binary = build_binary(target, version, commit, work)
     payload = binary.read_bytes()
 
@@ -221,7 +241,9 @@ def build_wheel(target: Target, version: str, commit: str, out_dir: Path, work: 
     for name, data, _ in entries:
         writer.writerow([name, record_hash(data), len(data)])
     writer.writerow([f"{dist_info}/RECORD", "", ""])
-    entries.append((f"{dist_info}/RECORD", record.getvalue().encode("utf-8"), MODE_REGULAR))
+    entries.append(
+        (f"{dist_info}/RECORD", record.getvalue().encode("utf-8"), MODE_REGULAR)
+    )
 
     filename = f"{ESCAPED}-{version}-{PYTHON_TAG}-{ABI_TAG}-{target.platform_tag}.whl"
     path = out_dir / filename
@@ -237,9 +259,15 @@ def build_wheel(target: Target, version: str, commit: str, out_dir: Path, work: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", help="release version (default: from git describe)")
-    parser.add_argument("--out", default=str(ROOT / "dist" / "pypi"), help="output directory")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--version", help="release version (default: from git describe)"
+    )
+    parser.add_argument(
+        "--out", default=str(ROOT / "dist" / "pypi"), help="output directory"
+    )
     parser.add_argument(
         "--targets",
         nargs="*",

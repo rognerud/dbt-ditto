@@ -172,6 +172,90 @@ func TestApplyWritesACatalogEntryForTheSource(t *testing.T) {
 	}
 }
 
+func TestApplyReplacesAStaleCatalogEntryForTheSource(t *testing.T) {
+	// `dbt docs generate` writes a sources entry for every source it can reach, so
+	// the interesting case is the ordinary one: a catalog already exists and is
+	// older than the warehouse. The provider read the relation a moment ago, so
+	// its answer wins — otherwise a column added since the last docs generate
+	// would never reach the downstream models.
+	p := &dbt.Project{
+		Name:     "shop",
+		Manifest: &dbt.Manifest{Nodes: map[string]*dbt.Node{}, Sources: map[string]*dbt.Node{}},
+		Catalog: &dbt.Catalog{
+			Nodes: map[string]*dbt.CatalogNode{},
+			Sources: map[string]*dbt.CatalogNode{
+				"source.shop.crm.customers": {Columns: map[string]dbt.CatalogColumn{
+					"id": {Name: "id", Type: "STRING", Index: 1},
+				}},
+			},
+		},
+	}
+	n := &dbt.Node{
+		UniqueID: "source.shop.crm.customers", Name: "customers",
+		ResourceType: "source", Database: "bq", Schema: "raw", Identifier: "customers",
+		Project: p, Columns: map[string]*dbt.Column{},
+	}
+
+	set := &Set{Docs: map[string]*Doc{n.UniqueID: {
+		UniqueID: n.UniqueID,
+		Columns: []ColumnDoc{
+			{Name: "id", DataType: "INT64", Index: 1},
+			{Name: "signed_up_at", DataType: "TIMESTAMP", Index: 2},
+		},
+	}}}
+
+	if w := Apply(set, []*dbt.Node{n}, (&config.Config{}).Resolve()); len(w) != 0 {
+		t.Fatalf("unexpected warnings: %v", w)
+	}
+
+	entry, ok := p.Catalog.Lookup(n)
+	if !ok {
+		t.Fatal("no catalog entry was written")
+	}
+	if got := entry.Columns["id"].Type; got != "INT64" {
+		t.Errorf("id type = %q, want the provider's INT64 rather than the stale STRING", got)
+	}
+	if _, ok := entry.Columns["signed_up_at"]; !ok {
+		t.Error("the column the relation grew since the last docs generate is missing")
+	}
+}
+
+func TestApplyLeavesAModelsCatalogEntryAlone(t *testing.T) {
+	// A unique_id that is a model in the catalog is dbt's own output for a relation
+	// this project builds; a provider has nothing to add to it.
+	p := &dbt.Project{
+		Name:     "shop",
+		Manifest: &dbt.Manifest{Nodes: map[string]*dbt.Node{}, Sources: map[string]*dbt.Node{}},
+		Catalog: &dbt.Catalog{
+			Sources: map[string]*dbt.CatalogNode{},
+			Nodes: map[string]*dbt.CatalogNode{
+				"source.shop.crm.customers": {Columns: map[string]dbt.CatalogColumn{
+					"id": {Name: "id", Type: "STRING", Index: 1},
+				}},
+			},
+		},
+	}
+	n := &dbt.Node{
+		UniqueID: "source.shop.crm.customers", Name: "customers",
+		ResourceType: "source", Database: "bq", Schema: "raw", Identifier: "customers",
+		Project: p, Columns: map[string]*dbt.Column{},
+	}
+
+	set := &Set{Docs: map[string]*Doc{n.UniqueID: {
+		UniqueID: n.UniqueID,
+		Columns:  []ColumnDoc{{Name: "id", DataType: "INT64", Index: 1}},
+	}}}
+
+	Apply(set, []*dbt.Node{n}, (&config.Config{}).Resolve())
+
+	if len(p.Catalog.Sources) != 0 {
+		t.Errorf("a source entry was written alongside the model entry: %+v", p.Catalog.Sources)
+	}
+	if got := p.Catalog.Nodes[n.UniqueID].Columns["id"].Type; got != "STRING" {
+		t.Errorf("the model entry was overwritten: id type = %q", got)
+	}
+}
+
 func TestApplyNeverOverwritesSomethingWrittenByHand(t *testing.T) {
 	p := &dbt.Project{Name: "shop", Manifest: &dbt.Manifest{
 		Nodes: map[string]*dbt.Node{}, Sources: map[string]*dbt.Node{},

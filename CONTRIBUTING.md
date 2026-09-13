@@ -17,6 +17,11 @@ make fixture         # rebuild the DuckDB warehouse and artifacts
 make matrix          # re-capture artifacts, once per dbt version
 make matrix-test     # replay every captured version and adapter
 make providers       # the providers' offline tests
+make audit           # everything CI checks that is not a test
+make lint            # golangci-lint, config included
+make ruff            # lint and format-check the Python
+make pin-check       # every action ref is pinned and resolves
+make zizmor          # audit the workflows for what a linter misses
 make hooks           # install the lefthook git hooks
 make dist            # cross-compile release archives
 make wheels          # build the PyPI wheels
@@ -24,7 +29,9 @@ make verify-wheels   # build them, prove they install under pip and uv
 ```
 
 `make parity`, `bench`, `fixture`, `providers` and the wheel targets need the
-Python environment (`uv sync`); everything else needs only Go. Dependencies and
+Python environment (`uv sync`); `make ruff` and `make zizmor` need only `uvx`,
+which fetches its own; everything else needs only Go. `make doctor` says which
+optional tools are present and what goes unchecked without each one. Dependencies and
 the build cache live in `.gocache/` inside the repository, so nothing depends on
 writable state elsewhere. The first build populates it and needs the network.
 
@@ -80,10 +87,10 @@ DuckDB build carrying the cases that break naive implementations:
 | Aggregates, and columns packed into a struct | `fct_customer_totals`, `dim_customer_profile` |
 
 On the cross-project half, dbt-osmosis does not produce different output. It
-crashes, because it is not compatible with dbt-loom
-(`AttributeError: 'LoomRunnableConfig' object has no attribute 'project_root'`,
-traceback in `testdata/golden/osmosis-analytics-failure.log`). That
-incompatibility is the reason this project exists.
+crashes, because it is not compatible with dbt-loom:
+`AttributeError: 'LoomRunnableConfig' object has no attribute 'project_root'`.
+That incompatibility is the reason this project exists. `make parity` prints the
+traceback and leaves it in `.gocache/parity/osmosis-analytics.log`.
 
 ## dbt versions
 
@@ -134,8 +141,16 @@ behave, or that the queries return what they claim. Those need an account.
 
 `make hooks` installs [lefthook](https://lefthook.dev): pre-commit runs the fast
 checks (~3s), pre-push the whole Go suite, race detector and build (~12s).
-Neither needs dbt, Docker or the network, which is what makes them safe to block
-on ([`lefthook.yml`](lefthook.yml) has the jobs).
+Neither needs dbt or Docker ([`lefthook.yml`](lefthook.yml) has the jobs).
+
+Two jobs do reach the network, and both degrade rather than block. Pre-commit
+runs `ruff` through `uvx`, which downloads the pinned version once and then
+answers from its cache; without `uvx` the job falls back to a syntax check.
+Pre-push asks GitHub whether every action reference in `.github/workflows`
+resolves — the check that catches a tag like `trivy-action@0.28.0`, which is
+valid workflow syntax and does not exist. Unauthenticated that API allows 60
+requests an hour; set `GITHUB_TOKEN` if you hit it. A rate limit is reported, not
+failed.
 
 ## Speed
 
@@ -158,7 +173,7 @@ dominated by opening files). What must not regress:
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race, shellcheck, provider tests, live parity diff |
+| `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race, lint, ruff, shellcheck, workflow checks, provider tests, live parity diff |
 | `draft-release.yml`, `labeler.yml` | push to `main` | keep one draft release current, and its labels in sync |
 | `release.yml` | draft release **published** | version bump + tag move, archives, wheels, PyPI |
 

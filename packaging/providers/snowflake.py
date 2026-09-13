@@ -9,7 +9,7 @@ from typing import Any
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
-from dbt_ditto_provider import (  # noqa: E402
+from dbt_ditto_provider import (
     Column,
     Doc,
     Source,
@@ -84,7 +84,7 @@ def fetch_columns(cursor, database: str, schema: str, tables: list[str]) -> dict
         from {quote_ident(database)}.information_schema.columns
         where table_schema = %s and table_name in ({placeholders})
         order by table_name, ordinal_position
-        """,
+        """,  # noqa: S608 - see quote_ident; placeholders is generated %s, not a value
         [schema.upper()] + [t.upper() for t in tables],
     )
     out: dict[str, list[Column]] = defaultdict(list)
@@ -108,7 +108,7 @@ def fetch_table_comments(cursor, database: str, schema: str, tables: list[str]) 
         select table_name, comment
         from {quote_ident(database)}.information_schema.tables
         where table_schema = %s and table_name in ({placeholders})
-        """,
+        """,  # noqa: S608 - see quote_ident; placeholders is generated %s, not a value
         [schema.upper()] + [t.upper() for t in tables],
     )
     return {row[0]: (row[1] or "") for row in cursor.fetchall()}
@@ -132,7 +132,7 @@ def fetch_tags(cursor, database: str, schema: str, tables: list[str]):
         where object_database = %s and object_schema = %s
           and object_name in ({placeholders})
           and object_deleted is null
-        """,
+        """,  # noqa: S608 - placeholders is generated %s; every value is bound below
         [database.upper(), schema.upper()] + [t.upper() for t in tables],
     )
     table_tags: dict[str, dict[str, str]] = defaultdict(dict)

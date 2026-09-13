@@ -164,6 +164,80 @@ func TestDerivedMatchingDoesNothingWhenOff(t *testing.T) {
 	}
 }
 
+// An ancestor whose columns exist only in the catalog does not block a derived
+// match from reaching further up.
+//
+// The matcher indexes n.Columns, which is the manifest; a catalog-only column is
+// reached instead by the EffectiveColumn fallback in matcher.find, and only under
+// its exact name. That asymmetry is deliberate. A catalog-backed column carries no
+// documentation at all — EffectiveColumn returns the shared empty sentinel, since
+// a catalog records a column's existence, type and ordinal, not anyone's prose.
+// What that sentinel buys is the claim in inheritInto: the first ancestor in a
+// generation that has the column takes it and the rest of the generation is
+// skipped, as dbt-osmosis does. So it shadows siblings, not ancestors. Under an
+// exact name that claim is right. Under a derived name the column was renamed on
+// the way down, which is the case this feature exists to follow, so a relation
+// that merely happens to hold a similarly named column must not stop it.
+func TestACatalogOnlyAncestorDoesNotShadowADerivedMatch(t *testing.T) {
+	documented := seed("p", "raw", col("amount_cents", "Order gross value."))
+	// No manifest columns: `dbt docs generate` ran, nobody wrote YAML.
+	passthrough := node("p", "stg", []string{"seed.p.raw"})
+	down := node("p", "agg", []string{"model.p.stg"}, col("total_amount_cents", ""))
+
+	p := project("p", documented, passthrough, down)
+	catalogFor(p, passthrough, "amount_cents")
+
+	r := resolverFor(t, derivedOn, p)
+	got := columnDoc(t, r.Resolve(down, Existing{}), "total_amount_cents")
+	if got.Description != "Order gross value." {
+		t.Fatalf("description = %q, want the rename followed past the undocumented "+
+			"catalog-only model to the seed that documents it", got.Description)
+	}
+}
+
+// The other half of the same rule, and what the EffectiveColumn fallback is
+// actually for. Within one generation the first ancestor that has the column
+// claims it and the rest of the generation is skipped, so a catalog-only parent
+// shadows its *siblings* — it does not shadow its own ancestors, because
+// generations are folded furthest-first and an empty description never overwrites
+// one. Under an exact name that claim stands.
+func TestACatalogOnlyParentShadowsItsSiblingsUnderAnExactName(t *testing.T) {
+	// Both parents are the same generation; unique_id orders stg_a first.
+	bare := node("p", "stg_a", nil)
+	documented := node("p", "stg_b", nil, col("amount_cents", "Order gross value."))
+	down := node("p", "agg", []string{"model.p.stg_a", "model.p.stg_b"},
+		col("amount_cents", ""))
+
+	p := project("p", bare, documented, down)
+	catalogFor(p, bare, "amount_cents")
+
+	r := resolverFor(t, derivedOn, p)
+	if got := columnDoc(t, r.Resolve(down, Existing{}), "amount_cents"); got.SetDescription {
+		t.Fatalf("description = %q, want none: the first parent of the generation has "+
+			"the column and does not document it", got.Description)
+	}
+}
+
+// And under a derived name the same catalog-only parent does not claim it, so the
+// documented sibling is reached. This is the asymmetry stated above, in the one
+// place where it changes an answer.
+func TestACatalogOnlyParentDoesNotShadowSiblingsUnderADerivedName(t *testing.T) {
+	bare := node("p", "stg_a", nil)
+	documented := node("p", "stg_b", nil, col("amount_cents", "Order gross value."))
+	down := node("p", "agg", []string{"model.p.stg_a", "model.p.stg_b"},
+		col("total_amount_cents", ""))
+
+	p := project("p", bare, documented, down)
+	catalogFor(p, bare, "amount_cents")
+
+	r := resolverFor(t, derivedOn, p)
+	got := columnDoc(t, r.Resolve(down, Existing{}), "total_amount_cents")
+	if got.Description != "Order gross value." {
+		t.Fatalf("description = %q, want the documented sibling reached: the renamed "+
+			"column is not the catalog-only parent's column", got.Description)
+	}
+}
+
 // --- struct type parsing ---------------------------------------------------
 
 func TestStructFieldExpansion(t *testing.T) {

@@ -48,7 +48,8 @@ type NodeDoc struct {
 	SetDescription  bool
 	DescriptionFrom string
 
-	Meta []MetaEntry
+	// No node-level Meta: dbt-osmosis inherits a node's description but not its
+	// meta, and matching it is the point. Column meta is on ColumnDoc.
 
 	// Columns is the full desired column list, in write order.
 	Columns []ColumnDoc
@@ -82,7 +83,7 @@ func (d *NodeDoc) warn(column, kind, format string, args ...any) {
 
 // Changed reports whether the resolution asks for any edit at all.
 func (d *NodeDoc) Changed() bool {
-	if d.SetDescription || len(d.Meta) > 0 || len(d.Drop) > 0 {
+	if d.SetDescription || len(d.Drop) > 0 {
 		return true
 	}
 	for _, c := range d.Columns {
@@ -121,9 +122,10 @@ type ExistingColumn struct {
 }
 
 // Existing is the current YAML state of a node, read from the schema file.
+// No node-level Meta, for the same reason NodeDoc has none: nothing inherits it,
+// so reading it would only be state that could drift.
 type Existing struct {
 	Description string
-	Meta        []MetaEntry
 	Columns     []ExistingColumn
 }
 

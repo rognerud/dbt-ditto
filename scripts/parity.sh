@@ -138,7 +138,11 @@ mkdir -p "${GOLDEN}"
 ( cd "${WORK}/osmosis/platform" && find . -name '*.yml' -not -path './target/*' -not -path './logs/*' \
     -not -name 'profiles.yml' -not -name '.user.yml' -not -name 'dbt_project.yml' \
     -print0 | cpio -pd0m --quiet "${GOLDEN}" )
-cp "${WORK}/osmosis-analytics.log" "${GOLDEN}/../osmosis-analytics-failure.log"
+# The dbt-osmosis crash on the cross-project project is not recorded as a golden
+# file. It was `rich` console output hard wrapped to whatever terminal width the
+# run happened at, over absolute paths from whoever regenerated it, and no test
+# read it — so it produced a diff on every refresh and asserted nothing. The run
+# above still prints it; ${WORK}/osmosis-analytics.log has it when you want it.
 
 # The cross-project project has no dbt-osmosis reference to compare against, so
 # dbt-ditto' own output is recorded instead.

@@ -17,8 +17,12 @@ VERSION="${VERSION:-$(git -C "${ROOT}" describe --tags --always --dirty 2>/dev/n
 # `rev-parse HEAD` prints "HEAD" on a repository with no commits yet, so verify.
 COMMIT="$(git -C "${ROOT}" rev-parse -q --verify HEAD 2>/dev/null || echo unknown)"
 # Honour SOURCE_DATE_EPOCH so a rebuild of the same commit produces the same
-# bytes, which is what lets anyone verify a published binary.
-DATE="$(date -u -r "${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y-%m-%dT%H:%M:%SZ)"
+# bytes, which is what lets anyone verify a published binary. The two date
+# implementations disagree about how to render an epoch: GNU wants -d @seconds
+# and reads -r as a file path, BSD wants -r seconds and has no -d.
+EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+DATE="$(date -u -d "@${EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -r "${EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
 
 export GOCACHE="${GOCACHE:-${ROOT}/.gocache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-${ROOT}/.gocache/mod}"
@@ -58,11 +62,26 @@ for target in "${TARGETS[@]}"; do
   cp "${ROOT}/README.md" "${stage}/"
   [[ -f "${ROOT}/LICENSE" ]] && cp "${ROOT}/LICENSE" "${stage}/"
 
+  # Both tar and zip record each file's mtime, so a staged tree carrying the
+  # checkout's timestamps would produce a different archive on every run even
+  # though the binaries inside are byte-identical. Pin them to the build date;
+  # `touch -d` reads this exact ISO 8601 spelling under both GNU and BSD.
+  find "${stage}" -exec touch -d "${DATE}" {} +
+
   ( cd "${DIST}"
     if [[ "${os}" == windows ]]; then
-      zip -qr "${name}.zip" "${name}"
+      # -X drops the uid/gid and other local extra fields.
+      zip -qrX "${name}.zip" "${name}"
     else
-      tar -czf "${name}.tar.gz" "${name}"
+      # gzip -n leaves the name and timestamp out of the header, which `tar -z`
+      # would otherwise write. --owner/--numeric-owner are GNU-only; BSD tar
+      # spells them --uid/--gid, so ask each for the same thing in its own words.
+      if tar --version 2>/dev/null | grep -q GNU; then
+        own=(--owner=0 --group=0 --numeric-owner --sort=name)
+      else
+        own=(--uid 0 --gid 0 --numeric-owner)
+      fi
+      tar "${own[@]}" -cf - "${name}" | gzip -n >"${name}.tar.gz"
     fi )
   rm -rf "${stage}"
 
