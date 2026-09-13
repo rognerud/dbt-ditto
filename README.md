@@ -1,4 +1,4 @@
-# dbt-ditto
+# <img src="https://raw.githubusercontent.com/rognerud/dbt-ditto/main/.github/assets/logo.png" alt="" height="28"> dbt-ditto
 
 [![CI](https://github.com/rognerud/dbt-ditto/actions/workflows/ci.yml/badge.svg)](https://github.com/rognerud/dbt-ditto/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/go-1.24-00ADD8)

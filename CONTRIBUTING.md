@@ -9,6 +9,7 @@ documentation: [docs/](docs/usage.md).
 make                 # vet, test, build
 make test            # includes the recorded parity proof
 make features        # the Gherkin specifications, with output
+make docs            # the Gherkin inside docs/, with output
 make race            # the suite under the race detector
 make parity          # run real dbt-osmosis, refresh the golden files
 make bench           # head-to-head timing, then synthetic scaling
@@ -28,6 +29,30 @@ the build cache live in `.gocache/` inside the repository, so nothing depends on
 writable state elsewhere. The first build populates it and needs the network.
 
 Layout: [AGENTS.md](AGENTS.md#repository-layout).
+
+## Documentation that is executed
+
+[`docs/usage.md`](docs/usage.md) and
+[`docs/configuration.md`](docs/configuration.md) carry ```gherkin blocks, and
+`TestDocumentationIsTrue` ([`internal/features/docs_test.go`](internal/features/docs_test.go))
+extracts every one of them into a feature file and runs it against a binary built
+from the working tree. The markdown is the only copy: nothing is generated, so
+nothing can drift. A claim whose block stops passing fails `go test`, and the
+failure names the heading in the document it came from.
+
+Changing behaviour therefore means changing the prose, and a new flag or config
+key is documented by writing the scenario that shows it. Steps live in
+[`internal/features/`](internal/features/): `features_test.go` builds the project
+and asserts about the files, `cli_test.go` runs the command and reads its streams
+and exit code, `upstream_test.go` puts a second project beside the first. Godog
+runs in strict mode, so a step a block invents is a failure rather than a skip.
+
+The hand-written specifications in [`features/`](features/) are the same
+machinery aimed at behaviour that is not documentation: manifest ordering, the
+canonicalisation the parity proof assumes.
+
+Not executed, because no test process can prove it: the install commands in
+`docs/usage.md`. `make verify-wheels` covers the packaging half of that claim.
 
 ## Proof that it matches dbt-osmosis
 

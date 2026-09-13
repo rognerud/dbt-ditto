@@ -10,7 +10,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse -q --verify HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build test test-short features race vet bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
+.PHONY: all build test test-short features docs race vet bench parity parity-check fixture matrix matrix-test providers hooks dist wheels verify-wheels clean help
 
 all: vet test build
 
@@ -24,7 +24,11 @@ test: | $(TMPDIR)
 
 ## features: run the behaviour specifications in features/, with their output
 features: | $(TMPDIR)
-	go test ./internal/features/ -v
+	go test ./internal/features/ -run TestFeatures -v
+
+## docs: run the Gherkin in docs/usage.md and docs/configuration.md
+docs: | $(TMPDIR)
+	go test ./internal/features/ -run TestDocumentationIsTrue -v
 
 ## test-short: the quick subset the pre-commit hook runs
 test-short: | $(TMPDIR)

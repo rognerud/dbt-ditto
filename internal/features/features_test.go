@@ -44,18 +44,36 @@ type node struct {
 	body   map[string]any
 }
 
+// catalogColumn is one column as the warehouse reports it. A scenario needs
+// these whenever it is about reconciliation rather than inheritance: adding,
+// removing, typing or re-casing a column all start from catalog.json.
+type catalogColumn struct {
+	name, dataType, comment string
+}
+
 // world is the scenario's state: a project, and the runs made over it.
 type world struct {
 	dir        string
 	nodes      []node
 	files      map[string]string
 	configYAML string
+	// catalog holds the warehouse columns per node id; an absent node has no
+	// catalog entry, which is a legitimate state dbt itself produces.
+	catalog map[string][]catalogColumn
+	// artifacts is where manifest.json and catalog.json are written, `target/`
+	// unless the scenario says otherwise.
+	artifacts string
+	// upstreams are the other projects the scenario declared, beside this one.
+	upstreams []*upstream
 	// tmp holds every directory the scenario made, for removal when it ends.
 	tmp []string
 
 	// snapshots of the tree after each run, keyed by run order.
 	runs []map[string]string
 	rep  *runner.Report
+	// cli is the last command run through the binary, for the scenarios that are
+	// about what a user types and reads.
+	cli *invocation
 }
 
 func initScenario(sc *godog.ScenarioContext) {
@@ -66,20 +84,40 @@ func initScenario(sc *godog.ScenarioContext) {
 	sc.Given(`^a source "([^"]*)\.([^"]*)" with columns:$`, w.aSource)
 	sc.Given(`^a model "([^"]*)" reading from "([^"]*)" with columns:$`, w.aModelReadingFromSeed)
 	sc.Given(`^a model "([^"]*)" reading from source "([^"]*)\.([^"]*)" with columns:$`, w.aModelReadingFromSource)
+	sc.Given(`^a model "([^"]*)" reading from "([^"]*)" and "([^"]*)" with columns:$`, w.aModelWithTwoParents)
+	sc.Given(`^a model "([^"]*)" with columns:$`, w.aRootModel)
+	sc.Given(`^a seed "([^"]*)" documenting "([^"]*)" as "([^"]*)"$`, w.aDocumentedSeed)
+	sc.Given(`^an undocumented model "([^"]*)" reading from "([^"]*)" with column "([^"]*)"$`, w.anUndocumentedModel)
 	sc.Given(`^the file "([^"]*)":$`, w.theFile)
 	sc.Given(`^the config:$`, w.theConfig)
+	sc.Given(`^the warehouse reports for "([^"]*)":$`, w.theCatalog)
+	sc.Given(`^the artifacts are in "([^"]*)"$`, w.theArtifactsAreIn)
+	sc.Given(`^the node description of "([^"]*)" is "([^"]*)"$`, w.theNodeDescription)
+	sc.Given(`^an upstream project "([^"]*)" documenting "([^"]*)\.([^"]*)" as "([^"]*)"$`, w.anUpstreamProject)
 
 	sc.When(`^dbt-ditto runs$`, w.run)
 	sc.When(`^dbt-ditto runs in check mode$`, w.runCheck)
 	sc.When(`^dbt-ditto runs again with the manifest nodes in reverse order$`, w.runReversed)
+	sc.When("^I run `([^`]*)`$", w.runCLI)
 
 	sc.Then(`^the file "([^"]*)" contains:$`, w.fileContains)
+	sc.Then(`^the file "([^"]*)" contains, in order:$`, w.fileContainsInOrder)
 	sc.Then(`^the file "([^"]*)" does not contain "([^"]*)"$`, w.fileDoesNotContain)
 	sc.Then(`^the file "([^"]*)" lists entries in the order:$`, w.fileLists)
+	sc.Then(`^the file "([^"]*)" is gone$`, w.fileIsGone)
 	sc.Then(`^the two runs are identical once canonicalised$`, w.runsAgreeCanonically)
 	sc.Then(`^changes are reported$`, w.changesReported)
 	sc.Then(`^no changes are reported$`, w.noChangesReported)
 	sc.Then(`^no file on disk changed$`, w.nothingChangedOnDisk)
+
+	sc.Then(`^the exit code is (\d+)$`, w.exitCodeIs)
+	sc.Then(`^it prints:$`, w.stdoutContains)
+	sc.Then(`^it prints "([^"]*)"$`, w.stdoutContainsLine)
+	sc.Then(`^it does not print "([^"]*)"$`, w.stdoutLacks)
+	sc.Then(`^it warns:$`, w.stderrContains)
+	sc.Then(`^it warns "([^"]*)"$`, w.stderrContainsLine)
+	sc.Then(`^it warns about nothing$`, w.stderrSilent)
+	sc.Then(`^the upstream project "([^"]*)" was not written to$`, w.upstreamUntouched)
 
 	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
 		for _, dir := range w.tmp {
@@ -93,16 +131,22 @@ func initScenario(sc *godog.ScenarioContext) {
 // --- Given ------------------------------------------------------------------
 
 func (w *world) aProject() error {
-	w.dir = w.tempDir()
+	w.dir = w.projectDir()
 	w.nodes = nil
 	w.files = map[string]string{}
 	w.configYAML = ""
+	w.catalog = map[string][]catalogColumn{}
+	w.artifacts = ""
+	w.upstreams = nil
 	w.runs = nil
 	w.rep = nil
+	w.cli = nil
 	return nil
 }
 
-// columns reads a `| column | description |` table into manifest columns.
+// columns reads a `| column | description |` table into manifest columns. A
+// `meta` cell is inline YAML, so a scenario can declare the markers that live in
+// meta without a table per key.
 func columns(tbl *godog.Table) (map[string]any, error) {
 	if len(tbl.Rows) == 0 {
 		return nil, fmt.Errorf("the column table is empty")
@@ -123,7 +167,15 @@ func columns(tbl *godog.Table) (map[string]any, error) {
 		if name == "" {
 			return nil, fmt.Errorf("a row has no column name")
 		}
-		out[name] = map[string]any{"name": name, "description": cell["description"]}
+		col := map[string]any{"name": name, "description": cell["description"]}
+		if raw := cell["meta"]; raw != "" {
+			var meta map[string]any
+			if err := yaml.Unmarshal([]byte(raw), &meta); err != nil {
+				return nil, fmt.Errorf("parse the meta of column %q: %w", name, err)
+			}
+			col["meta"] = meta
+		}
+		out[name] = col
 	}
 	return out, nil
 }
@@ -175,11 +227,147 @@ func (w *world) aSource(sourceName, name string, tbl *godog.Table) error {
 }
 
 func (w *world) aModelReadingFromSeed(name, parent string, tbl *godog.Table) error {
-	return w.addModel(name, []string{"seed.demo." + parent}, tbl)
+	return w.addModel(name, []string{w.parentID(parent)}, tbl)
 }
 
 func (w *world) aModelReadingFromSource(name, sourceName, table string, tbl *godog.Table) error {
 	return w.addModel(name, []string{"source.demo." + sourceName + "." + table}, tbl)
+}
+
+// aRootModel is a model with no parents, for the scenarios about reconciling a
+// model against the warehouse rather than against the DAG.
+func (w *world) aRootModel(name string, tbl *godog.Table) error {
+	return w.addModel(name, []string{}, tbl)
+}
+
+func (w *world) aModelWithTwoParents(name, first, second string, tbl *godog.Table) error {
+	return w.addModel(name, []string{w.parentID(first), w.parentID(second)}, tbl)
+}
+
+// parentID resolves a parent written by its bare name against what the scenario
+// has already declared, so a model may read from a seed or from another model
+// without the scenario spelling out unique_ids.
+func (w *world) parentID(name string) string {
+	for _, n := range w.nodes {
+		if got, _ := n.body["name"].(string); got == name {
+			return n.id
+		}
+	}
+	if id := w.upstreamID(name); id != "" {
+		return id
+	}
+	return "seed.demo." + name
+}
+
+// aDocumentedSeed and anUndocumentedModel are the smallest DAG documentation can
+// flow down, as one line each: the scenarios about flags and about the config
+// file are not about the shape of the project, and spelling one out in tables
+// would bury what they are about.
+func (w *world) aDocumentedSeed(name, column, description string) error {
+	w.nodes = append(w.nodes, node{id: "seed.demo." + name, body: map[string]any{
+		"unique_id":          "seed.demo." + name,
+		"name":               name,
+		"resource_type":      "seed",
+		"package_name":       "demo",
+		"schema":             "main",
+		"database":           "demo",
+		"original_file_path": "seeds/" + name + ".csv",
+		"path":               name + ".csv",
+		"fqn":                []string{"demo", name},
+		"columns": map[string]any{
+			column: map[string]any{"name": column, "description": description},
+		},
+		"depends_on": map[string]any{"nodes": []string{}},
+		"config":     map[string]any{"dbt-osmosis": "_seeds.yml"},
+	}})
+	return nil
+}
+
+func (w *world) anUndocumentedModel(name, parent, column string) error {
+	w.addModelColumns(name, []string{w.parentID(parent)}, map[string]any{
+		column: map[string]any{"name": column, "description": ""},
+	})
+	return w.theFile("models/_"+name+".yml", &godog.DocString{Content: fmt.Sprintf(
+		"version: 2\nmodels:\n  - name: %s\n    columns:\n      - name: %s\n", name, column)})
+}
+
+// theNodeDescription documents the table itself rather than one of its columns,
+// which is a separate thing to inherit.
+func (w *world) theNodeDescription(nodeName, description string) error {
+	for i := range w.nodes {
+		if w.nodes[i].id == w.nodeID(nodeName) {
+			w.nodes[i].body["description"] = description
+			return nil
+		}
+	}
+	return fmt.Errorf("no node named %q has been declared", nodeName)
+}
+
+// theArtifactsAreIn puts manifest.json and catalog.json somewhere other than
+// `target/`, which is what a CI job that downloads them does.
+func (w *world) theArtifactsAreIn(dir string) error {
+	w.artifacts = dir
+	return nil
+}
+
+// target is the directory the artifacts are written to, `target/` unless the
+// scenario moved them.
+func (w *world) target() string {
+	if w.artifacts != "" {
+		return w.artifacts
+	}
+	return "target"
+}
+
+// theCatalog records what `dbt docs generate` found for a node: the column list
+// the warehouse reports, with its types and its COMMENTs.
+func (w *world) theCatalog(nodeName string, tbl *godog.Table) error {
+	if len(tbl.Rows) == 0 {
+		return fmt.Errorf("the warehouse table is empty")
+	}
+	head := make([]string, 0, len(tbl.Rows[0].Cells))
+	for _, c := range tbl.Rows[0].Cells {
+		head = append(head, strings.TrimSpace(c.Value))
+	}
+	var cols []catalogColumn
+	for _, row := range tbl.Rows[1:] {
+		cell := map[string]string{}
+		for i, c := range row.Cells {
+			if i < len(head) {
+				cell[head[i]] = strings.TrimSpace(c.Value)
+			}
+		}
+		if cell["column"] == "" {
+			return fmt.Errorf("a row has no column name")
+		}
+		cols = append(cols, catalogColumn{
+			name:     cell["column"],
+			dataType: cell["data_type"],
+			comment:  cell["comment"],
+		})
+	}
+	id := w.nodeID(nodeName)
+	if id == "" {
+		return fmt.Errorf("no node named %q has been declared", nodeName)
+	}
+	w.catalog[id] = cols
+	return nil
+}
+
+// nodeID finds a declared node by its bare name, or by `source.table` for a
+// source, which is how the scenarios name them.
+func (w *world) nodeID(name string) string {
+	for _, n := range w.nodes {
+		if got, _ := n.body["name"].(string); got == name {
+			return n.id
+		}
+		if src, _ := n.body["source_name"].(string); src != "" {
+			if got, _ := n.body["name"].(string); src+"."+got == name {
+				return n.id
+			}
+		}
+	}
+	return ""
 }
 
 func (w *world) addModel(name string, deps []string, tbl *godog.Table) error {
@@ -187,6 +375,11 @@ func (w *world) addModel(name string, deps []string, tbl *godog.Table) error {
 	if err != nil {
 		return err
 	}
+	w.addModelColumns(name, deps, cols)
+	return nil
+}
+
+func (w *world) addModelColumns(name string, deps []string, cols map[string]any) {
 	w.nodes = append(w.nodes, node{id: "model.demo." + name, body: map[string]any{
 		"unique_id":          "model.demo." + name,
 		"name":               name,
@@ -203,7 +396,6 @@ func (w *world) addModel(name string, deps []string, tbl *godog.Table) error {
 		// One file per model, as the fixture project lays them out.
 		"config": map[string]any{"dbt-osmosis": "_{model}.yml"},
 	}})
-	return nil
 }
 
 func (w *world) theFile(rel string, body *godog.DocString) error {
@@ -248,7 +440,7 @@ func (w *world) execute(opts runner.Options, reverse bool) error {
 	} else if reverse {
 		// A reversed run describes the same project with a differently ordered
 		// manifest, so it needs its own copy of the tree.
-		w.dir = w.tempDir()
+		w.dir = w.projectDir()
 		if err := w.writeProject(true); err != nil {
 			return err
 		}
@@ -288,7 +480,7 @@ func (w *world) config() (*config.Config, error) {
 }
 
 func (w *world) writeProject(reverse bool) error {
-	for _, sub := range []string{"models", "seeds", "target"} {
+	for _, sub := range []string{"models", "seeds", w.target()} {
 		if err := os.MkdirAll(filepath.Join(w.dir, sub), 0o755); err != nil {
 			return err
 		}
@@ -343,17 +535,62 @@ func (w *world) writeManifest(reverse bool) error {
 	}
 	b.WriteString("}")
 
-	target := filepath.Join(w.dir, "target")
+	target := filepath.Join(w.dir, w.target())
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(target, "manifest.json"), []byte(b.String()), 0o644); err != nil {
 		return err
 	}
-	// An empty catalog: these scenarios are about the manifest, and a missing
-	// catalog is a legitimate state.
-	catalog := `{"metadata":{"dbt_version":"1.8.0"},"nodes":{},"sources":{}}`
-	return os.WriteFile(filepath.Join(target, "catalog.json"), []byte(catalog), 0o644)
+	return w.writeCatalog(target)
+}
+
+// writeCatalog emits catalog.json from what the scenario said the warehouse
+// reports. A scenario that says nothing gets an empty catalog, which is a state
+// dbt itself produces and which the manifest-only scenarios rely on.
+func (w *world) writeCatalog(target string) error {
+	type catColumn struct {
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		Comment string `json:"comment"`
+		Index   int    `json:"index"`
+	}
+	type catEntry struct {
+		Metadata map[string]string    `json:"metadata"`
+		Columns  map[string]catColumn `json:"columns"`
+	}
+	doc := map[string]any{
+		"metadata": map[string]string{"dbt_version": "1.8.0"},
+		"nodes":    map[string]catEntry{},
+		"sources":  map[string]catEntry{},
+	}
+	for _, n := range w.nodes {
+		cols, ok := w.catalog[n.id]
+		if !ok {
+			continue
+		}
+		entry := catEntry{
+			Metadata: map[string]string{
+				"name":     n.body["name"].(string),
+				"schema":   n.body["schema"].(string),
+				"database": n.body["database"].(string),
+			},
+			Columns: map[string]catColumn{},
+		}
+		for i, c := range cols {
+			entry.Columns[c.name] = catColumn{Name: c.name, Type: c.dataType, Comment: c.comment, Index: i}
+		}
+		key := "nodes"
+		if n.source {
+			key = "sources"
+		}
+		doc[key].(map[string]catEntry)[n.id] = entry
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(target, "catalog.json"), raw, 0o644)
 }
 
 // jsonKey quotes a JSON object key.
@@ -426,6 +663,28 @@ func (w *world) fileContains(rel string, want *godog.DocString) error {
 	return nil
 }
 
+// fileContainsInOrder is fileContains plus the order of the lines, which is the
+// only way to state a claim about column order.
+func (w *world) fileContainsInOrder(rel string, want *godog.DocString) error {
+	body, err := w.file(rel)
+	if err != nil {
+		return err
+	}
+	at := 0
+	for _, line := range strings.Split(strings.TrimSpace(want.Content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		i := strings.Index(body[at:], line)
+		if i < 0 {
+			return fmt.Errorf("%s does not contain %q after the line before it:\n%s", rel, line, body)
+		}
+		at += i + len(line)
+	}
+	return nil
+}
+
 func (w *world) fileDoesNotContain(rel, want string) error {
 	body, err := w.file(rel)
 	if err != nil {
@@ -433,6 +692,19 @@ func (w *world) fileDoesNotContain(rel, want string) error {
 	}
 	if strings.Contains(body, want) {
 		return fmt.Errorf("%s contains %q, and should not:\n%s", rel, want, body)
+	}
+	return nil
+}
+
+// fileIsGone asserts a schema file no longer exists, which is what organising a
+// model out of its last file leaves behind.
+func (w *world) fileIsGone(rel string) error {
+	snap, err := w.latest()
+	if err != nil {
+		return err
+	}
+	if body, ok := snap[rel]; ok {
+		return fmt.Errorf("%s still exists:\n%s", rel, body)
 	}
 	return nil
 }
@@ -552,6 +824,11 @@ func (w *world) nothingChangedOnDisk() error {
 		return err
 	}
 	for rel, want := range w.files {
+		// The snapshot holds schema YAML only, so a config file the scenario wrote
+		// is not something this comparison can speak about.
+		if !canon.IsSchemaFile(filepath.Base(rel)) {
+			continue
+		}
 		got, ok := snap[rel]
 		if !ok {
 			return fmt.Errorf("%s was deleted", rel)
@@ -566,6 +843,13 @@ func (w *world) nothingChangedOnDisk() error {
 		}
 	}
 	return nil
+}
+
+// projectDir puts the project in a directory named `project`, because the run
+// reports a file by its path from the project directory's own name: with a
+// temporary name there, no documented output could be quoted.
+func (w *world) projectDir() string {
+	return filepath.Join(w.tempDir(), "project")
 }
 
 // tempDir makes a directory the scenario owns.
