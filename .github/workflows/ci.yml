@@ -70,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh scripts/lib/*.sh
       - name: python syntax
         run: python3 -m compileall -q packaging scripts
 

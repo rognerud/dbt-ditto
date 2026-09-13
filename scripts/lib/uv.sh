@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+#
 # Shared by the scripts that build throwaway Python environments.
 #
 # Locate uv by running it, rather than with `command -v`: a sandbox may allow
