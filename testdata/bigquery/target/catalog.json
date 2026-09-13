@@ -1,0 +1,64 @@
+{
+  "metadata": {"dbt_schema_version": "https://schemas.getdbt.com/dbt/catalog/v1.json"},
+  "nodes": {
+    "model.bqshop.stg_customers": {
+      "metadata": {"type": "table", "database": "bq-project", "schema": "analytics", "name": "stg_customers"},
+      "columns": {
+        "customer_id": {"type": "INT64", "index": 1, "name": "customer_id", "comment": null},
+        "email": {"type": "STRING", "index": 2, "name": "email", "comment": null},
+        "customer": {"type": "STRUCT<`first_name` STRING, `last_name` STRING, `address` STRUCT<`city` STRING, `country` STRING>>", "index": 3, "name": "customer", "comment": null},
+        "customer.first_name": {"type": "STRING", "index": 4, "name": "customer.first_name", "comment": null},
+        "customer.last_name": {"type": "STRING", "index": 5, "name": "customer.last_name", "comment": null},
+        "customer.address": {"type": "STRUCT<`city` STRING, `country` STRING>", "index": 6, "name": "customer.address", "comment": null},
+        "customer.address.city": {"type": "STRING", "index": 7, "name": "customer.address.city", "comment": null},
+        "customer.address.country": {"type": "STRING", "index": 8, "name": "customer.address.country", "comment": null},
+        "items": {"type": "ARRAY<STRUCT<`sku` STRING, `quantity` INT64>>", "index": 9, "name": "items", "comment": null},
+        "items.sku": {"type": "STRING", "index": 10, "name": "items.sku", "comment": null},
+        "items.quantity": {"type": "INT64", "index": 11, "name": "items.quantity", "comment": null},
+        "lifetime_value": {"type": "NUMERIC(38, 9)", "index": 12, "name": "lifetime_value", "comment": null},
+        "signed_up_at": {"type": "TIMESTAMP", "index": 13, "name": "signed_up_at", "comment": null},
+        "home_location": {"type": "GEOGRAPHY", "index": 14, "name": "home_location", "comment": null},
+        "raw_payload": {"type": "JSON", "index": 15, "name": "raw_payload", "comment": null}
+      },
+      "stats": {}
+    },
+    "model.bqshop.dim_customers": {
+      "metadata": {"type": "table", "database": "bq-project", "schema": "analytics", "name": "dim_customers"},
+      "columns": {
+        "customer_id": {"type": "INT64", "index": 1, "name": "customer_id", "comment": null},
+        "email": {"type": "STRING", "index": 2, "name": "email", "comment": null},
+        "customer": {"type": "STRUCT<`first_name` STRING, `last_name` STRING>", "index": 3, "name": "customer", "comment": null},
+        "customer.first_name": {"type": "STRING", "index": 4, "name": "customer.first_name", "comment": null},
+        "customer.last_name": {"type": "STRING", "index": 5, "name": "customer.last_name", "comment": null},
+        "first_name": {"type": "STRING", "index": 6, "name": "first_name", "comment": null},
+        "city": {"type": "STRING", "index": 7, "name": "city", "comment": null},
+        "lifetime_value": {"type": "NUMERIC(38, 9)", "index": 8, "name": "lifetime_value", "comment": null}
+      },
+      "stats": {}
+    },
+    "model.bqshop.fct_customer_totals": {
+      "metadata": {"type": "table", "database": "bq-project", "schema": "analytics", "name": "fct_customer_totals"},
+      "columns": {
+        "customer_id": {"type": "INT64", "index": 1, "name": "customer_id", "comment": null},
+        "total_lifetime_value": {"type": "NUMERIC(38, 9)", "index": 2, "name": "total_lifetime_value", "comment": null},
+        "max_signed_up_at": {"type": "TIMESTAMP", "index": 3, "name": "max_signed_up_at", "comment": null}
+      },
+      "stats": {}
+    }
+  },
+  "sources": {
+    "source.bqshop.crm.raw_customers": {
+      "metadata": {"type": "table", "database": "bq-project", "schema": "raw", "name": "raw_customers"},
+      "columns": {
+        "customer_id": {"type": "INT64", "index": 1, "name": "customer_id", "comment": "Surrogate key assigned by the CRM."},
+        "email": {"type": "STRING", "index": 2, "name": "email", "comment": null},
+        "customer": {"type": "STRUCT<`first_name` STRING, `last_name` STRING>", "index": 3, "name": "customer", "comment": null},
+        "customer.first_name": {"type": "STRING", "index": 4, "name": "customer.first_name", "comment": "Given name exactly as the CRM stores it."},
+        "customer.last_name": {"type": "STRING", "index": 5, "name": "customer.last_name", "comment": null},
+        "lifetime_value": {"type": "NUMERIC(38, 9)", "index": 6, "name": "lifetime_value", "comment": null},
+        "signed_up_at": {"type": "TIMESTAMP", "index": 7, "name": "signed_up_at", "comment": null}
+      },
+      "stats": {}
+    }
+  }
+}

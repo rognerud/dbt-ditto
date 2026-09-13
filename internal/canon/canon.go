@@ -1,0 +1,111 @@
+// Package canon rewrites dbt schema YAML with its top-level entries sorted by name, so
+// two trees compare without depending on the order dbt happened to list its nodes in.
+package canon
+
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/rognerud/dbt-ditto/internal/yamlfile"
+	"gopkg.in/yaml.v3"
+)
+
+// EntryKeys are the top-level dbt schema sequences whose entries are named and
+var EntryKeys = []string{
+	"models", "seeds", "snapshots", "sources", "analyses", "exposures", "macros",
+}
+
+// skipNames are the project files that are configuration rather than schema.
+var skipNames = map[string]bool{
+	"dbt_project.yml":     true,
+	"profiles.yml":        true,
+	"packages.yml":        true,
+	"dependencies.yml":    true,
+	".user.yml":           true,
+	"dbt_ditto.yml":       true,
+	"dbt_loom.config.yml": true,
+	"dbt_osmosis.yml":     true,
+}
+
+// skipDirs are the generated directories that hold no hand-editable schema.
+var skipDirs = map[string]bool{
+	"target":       true,
+	"logs":         true,
+	"dbt_packages": true,
+}
+
+// Dir canonicalises every schema file under root, in place.
+func Dir(root string) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !IsSchemaFile(d.Name()) {
+			return nil
+		}
+		return File(path)
+	})
+}
+
+// IsSchemaFile reports whether a file name is dbt schema YAML.
+func IsSchemaFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return (ext == ".yml" || ext == ".yaml") && !skipNames[name]
+}
+
+// File canonicalises one schema file, in place.
+func File(path string) error {
+	f, err := yamlfile.Load(path)
+	if err != nil {
+		return err
+	}
+	Document(f)
+	out, err := f.Render()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// Document sorts the named entries of a loaded document.
+func Document(f *yamlfile.File) {
+	for _, key := range EntryKeys {
+		seq := f.Seq(key, false)
+		if seq == nil {
+			continue
+		}
+		sortByName(seq)
+		if key == "sources" {
+			// A source's tables are named entries in the same way.
+			for _, src := range seq.Content {
+				sortByName(yamlfile.MapGet(src, "tables"))
+			}
+		}
+	}
+}
+
+// sortByName orders a sequence of `name:`-keyed mappings alphabetically.
+func sortByName(seq *yaml.Node) {
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		return
+	}
+	sort.SliceStable(seq.Content, func(i, j int) bool {
+		return nameOf(seq.Content[i]) < nameOf(seq.Content[j])
+	})
+}
+
+func nameOf(n *yaml.Node) string {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return ""
+	}
+	return yamlfile.StringOf(yamlfile.MapGet(n, "name"))
+}

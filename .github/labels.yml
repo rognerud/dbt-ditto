@@ -1,0 +1,54 @@
+# The labels release-drafter reads: a PR's label decides both the section of the
+# notes it lands in and the version bump, so they are synced by labeler.yml
+# rather than created by hand and left to drift.
+#
+# `breaking` is a major bump, `enhancement` and `removal` minor. Everything else,
+# including an unlabelled PR, is a patch.
+
+- name: breaking
+  color: "b60205"
+  description: "Changes behaviour someone may be relying on (major)"
+
+- name: enhancement
+  color: "0e8a16"
+  description: "New capability (minor)"
+
+- name: removal
+  color: "d93f0b"
+  description: "Removes or deprecates something (minor)"
+
+- name: bug
+  color: "d73a4a"
+  description: "Something was wrong (patch)"
+
+- name: performance
+  color: "fbca04"
+  description: "Same answer, less time or memory (patch)"
+
+- name: documentation
+  color: "0075ca"
+  description: "README, docs/, or comments (patch)"
+
+- name: refactoring
+  color: "c5def5"
+  description: "Same behaviour, better shape (patch)"
+
+- name: testing
+  color: "bfd4f2"
+  description: "Tests and fixtures (patch)"
+
+- name: ci
+  color: "5319e7"
+  description: "Workflows, hooks and scripts (patch)"
+
+- name: build
+  color: "5319e7"
+  description: "Packaging and distribution (patch)"
+
+- name: dependencies
+  color: "0366d6"
+  description: "Dependency bumps (patch)"
+
+- name: skip-changelog
+  color: "ededed"
+  description: "Left out of the release notes entirely"

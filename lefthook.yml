@@ -1,0 +1,182 @@
+# Git hooks. Install with `lefthook install`, or `make hooks`.
+#
+# pre-commit is fast and local. pre-push is the whole Go suite, plus the one
+# check that has to ask GitHub something: whether the actions the workflows name
+# exist. Neither needs dbt or Docker. Anything that does — `make matrix`,
+# `make parity` — is deliberately not a hook: it is slow and it rewrites
+# committed fixtures. CI runs those.
+
+min_version: 2.0.0
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: gofmt
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+
+    # scripts/go-env.sh keeps the build cache, the module cache and the temporary
+    # directory inside the repository, as the Makefile does, so that a hook never
+    # writes to state elsewhere. It is a wrapper rather than an `env:` block
+    # because lefthook 2 does not expand `{root}` inside one and Go rejects a
+    # relative GOCACHE.
+    - name: vet
+      glob: "*.go"
+      # Package-scoped: vetting a subset of a package's files reports phantom errors.
+      run: ./scripts/go-env.sh go vet ./...
+
+    - name: unit tests
+      glob: "*.go"
+      run: ./scripts/go-env.sh go test -short ./internal/...
+
+    # The ```gherkin blocks in docs/ are the test suite for what the prose
+    # claims. The job above already runs them — `glob` only filters a job whose
+    # command takes {staged_files}, so `go test ./internal/...` runs on every
+    # commit whatever was staged. This job adds nothing but a name, which is the
+    # point: "documentation is true ✗" says what broke, where a failure buried in
+    # ./internal/... does not.
+    - name: documentation is true
+      run: ./scripts/go-env.sh go test -count=1 ./internal/features/ -run 'TestDocumentationIsTrue|TestExecutableBlocksAreFolded'
+
+    - name: shellcheck
+      glob: "*.sh"
+      # Skipped where shellcheck is not installed: a missing linter must not block.
+      run: |
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck {staged_files}
+        else
+          echo "shellcheck not installed, skipping"
+        fi
+
+    - name: shell syntax
+      glob: "*.sh"
+      run: |
+        for f in {staged_files}; do bash -n "$f"; done
+
+    # ruff replaces what `python3 -m py_compile` used to do here: it is a
+    # superset — a file that does not parse fails it too — and it is the linter
+    # the `# noqa:` codes already scattered through packaging/ were written for.
+    # Pinned, because a new ruff release must not be able to fail a commit.
+    - name: ruff format
+      glob: "*.py"
+      # Pinned so a new ruff release cannot start failing commits on its own.
+      # ci.yml and the Makefile spell the same number.
+      env: &ruff-env
+        RUFF_VERSION: "0.16.7"
+      run: |
+        if command -v uvx >/dev/null 2>&1; then
+          uvx "ruff@${RUFF_VERSION}" format {staged_files}
+        else
+          echo "uvx not installed, skipping"
+        fi
+      stage_fixed: true
+
+    - name: ruff
+      glob: "*.py"
+      env: *ruff-env
+      run: |
+        if command -v uvx >/dev/null 2>&1; then
+          uvx "ruff@${RUFF_VERSION}" check {staged_files}
+        else
+          for f in {staged_files}; do python3 -m py_compile "$f"; done
+        fi
+
+    # The GitHub API is not reached: --no-api checks that every `uses:` is already
+    # pinned to a commit SHA and that the version comment beside it is consistent.
+    # Resolving the refs against GitHub is pre-push, below, since that needs the
+    # network and a commit must not.
+    - name: actions are pinned
+      glob: ".github/workflows/*"
+      run: |
+        if [ -x .gocache/tools/pinact ]; then
+          .gocache/tools/pinact run --fix=false --no-api
+        elif command -v pinact >/dev/null 2>&1; then
+          pinact run --fix=false --no-api
+        else
+          echo "pinact not installed, skipping (make tools)"
+        fi
+
+    - name: artifacts are committed compressed
+      glob: "testdata/matrix/artifacts/**/*"
+      # The readers understand .gz, and a plain manifest is a few hundred KB of
+      # macro definitions. meta.json is exempt: it is read by humans.
+      run: |
+        for f in {staged_files}; do
+          case "$(basename "$f")" in
+            manifest.json|catalog.json)
+              echo "commit $f gzipped: see scripts/matrix.sh"
+              exit 1
+              ;;
+          esac
+        done
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: full test suite
+      run: ./scripts/go-env.sh go test ./...
+
+    - name: race detector
+      # Resolve, load and save all run in parallel.
+      run: ./scripts/go-env.sh go test -race ./internal/...
+
+    - name: build
+      run: ./scripts/go-env.sh go build ./...
+
+    # Both take tens of seconds, which is too slow for pre-commit but cheap
+    # against a push. Skipped rather than failed when not installed: `make tools`
+    # fetches them, and a missing linter must not block a push.
+    # `config verify` first: golangci-lint refuses to start on a setting it does
+    # not recognise, and in CI that arrives looking like a linting failure rather
+    # than like a typo in .golangci.yml.
+    - name: lint
+      run: |
+        if [ -x .gocache/tools/golangci-lint ]; then
+          GOLANGCI=.gocache/tools/golangci-lint
+        elif command -v golangci-lint >/dev/null 2>&1; then
+          GOLANGCI=golangci-lint
+        else
+          echo "golangci-lint not installed, skipping (make tools)"
+          exit 0
+        fi
+        ./scripts/go-env.sh "$GOLANGCI" config verify
+        ./scripts/go-env.sh "$GOLANGCI" run ./...
+
+    - name: vulnerabilities
+      run: |
+        if [ -x .gocache/tools/govulncheck ]; then
+          ./scripts/go-env.sh .gocache/tools/govulncheck ./...
+        elif command -v govulncheck >/dev/null 2>&1; then
+          ./scripts/go-env.sh govulncheck ./...
+        else
+          echo "govulncheck not installed, skipping (make tools)"
+        fi
+
+    # actionlint says a workflow is well-formed; it does not say the actions it
+    # names exist. `aquasecurity/trivy-action@0.28.0` passes actionlint and dies
+    # on the runner with "Unable to resolve action", because that repository's
+    # tags carry a `v`. pinact resolves every ref against GitHub, which is what
+    # turns that into a failed push rather than a failed run.
+    #
+    # Unauthenticated the API allows 60 requests an hour; set GITHUB_TOKEN if
+    # that is not enough. Exit 3 is pinact failing rather than the workflows
+    # being wrong — a rate limit, most often — so it is reported, not failed on.
+    # Exit 1 and 2 are the files, and those block the push.
+    - name: actions resolve
+      run: |
+        if [ -x .gocache/tools/pinact ]; then
+          PINACT=.gocache/tools/pinact
+        elif command -v pinact >/dev/null 2>&1; then
+          PINACT=pinact
+        else
+          echo "pinact not installed, skipping (make tools)"
+          exit 0
+        fi
+        "$PINACT" run --check && exit 0
+        status=$?
+        if [ "$status" -eq 3 ]; then
+          echo "pinact could not reach the GitHub API (rate limit? set GITHUB_TOKEN); not checked"
+          exit 0
+        fi
+        exit "$status"

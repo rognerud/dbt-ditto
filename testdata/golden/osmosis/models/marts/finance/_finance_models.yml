@@ -1,0 +1,36 @@
+version: 2
+models:
+  - name: fct_daily_revenue
+    columns:
+      - name: order_date
+        description: Calendar date the order was placed, in UTC.
+        data_type: DATE
+        config:
+          meta:
+            owner: commerce-team
+      - name: order_count
+        data_type: BIGINT
+      - name: revenue_cents
+        data_type: HUGEINT
+  - name: fct_customer_revenue
+    description: One row per customer with revenue aggregates, for the finance team.
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+      - name: signup_country
+        description: ISO 3166-1 alpha-2 country the customer signed up from.
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+      - name: lifetime_order_count
+        data_type: BIGINT
+      - name: lifetime_value_cents
+        description: Lifetime gross revenue from the customer, in minor units.
+        data_type: HUGEINT

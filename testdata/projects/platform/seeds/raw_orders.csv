@@ -1,0 +1,7 @@
+order_id,customer_id,order_date,status,amount_cents
+101,1,2024-01-04,completed,2400
+102,1,2024-02-11,completed,1899
+103,2,2024-02-14,returned,3200
+104,3,2024-03-02,completed,750
+105,5,2024-03-19,pending,12050
+106,5,2024-04-01,completed,640

@@ -1,0 +1,40 @@
+name: draft release
+
+# Keeps the draft release on `main` current: every merge updates its notes and
+# recomputes the next version from the merged PRs' labels. See
+# .github/release-drafter.yml. This never tags and never publishes.
+
+on:
+  push:
+    branches: [main]
+  # Re-runs on label changes so the version in the draft reflects a label that
+  # was corrected after the fact.
+  #
+  # pull_request_target is dangerous when a workflow checks out and then executes
+  # the pull request's code, because it runs with write permissions against the
+  # base repository. This one never checks anything out: its single step reads
+  # labels and titles through the API. The trigger is needed because
+  # `pull_request` would have no permission to update the draft at all.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draft-release
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      # Writing the draft release, and reading pull requests to build its notes.
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: release-drafter/release-drafter@34d80673e067bdc0c24568d3af899c216adcfaa9 # v7.7.0
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

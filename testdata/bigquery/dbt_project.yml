@@ -1,0 +1,11 @@
+name: bqshop
+version: "1.0.0"
+config-version: 2
+profile: bqshop
+
+model-paths: ["models"]
+target-path: "target"
+
+models:
+  bqshop:
+    +dbt-osmosis: "_{model}.yml"

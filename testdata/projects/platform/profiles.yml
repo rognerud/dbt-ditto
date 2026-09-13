@@ -1,0 +1,8 @@
+platform:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DBT_DITTO_DB') }}"
+      schema: main
+      threads: 4

@@ -1,0 +1,13 @@
+# Both manifests are loaded into one graph, so analytics.customer_report can
+# inherit column documentation from platform.dim_customers even though the two
+# projects are parsed separately. Set `upstream: true` on a project to load its
+# manifest for metadata only and never write to its YAML.
+projects:
+  - path: projects/platform
+  - path: projects/analytics
+
+inheritance:
+  columns: true
+  meta: true
+  tags: true
+  node_description: false

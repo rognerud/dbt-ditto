@@ -1,0 +1,16 @@
+# Credentials are deliberately fake: fakesnow intercepts the connector before
+# anything is sent anywhere, so none of these values reach a network.
+matrix:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: fake
+      user: fake
+      password: fake
+      role: fake
+      database: analytics
+      warehouse: fake
+      schema: public
+      threads: 1
+      client_session_keep_alive: false

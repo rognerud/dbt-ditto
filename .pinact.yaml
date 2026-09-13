@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/suzuki-shunsuke/pinact/refs/heads/main/json-schema/pinact.json
+#
+# pinact pins every `uses:` reference to a commit SHA, with the tag it came from
+# in a trailing comment. Two things fall out of that, and both are the point:
+#
+#   - A tag can be moved to new code after anyone reviewed it. A SHA cannot, so
+#     what a workflow runs is what was read.
+#   - Pinning means resolving, and resolving means asking GitHub whether the ref
+#     exists. `aquasecurity/trivy-action@0.28.0` is valid YAML and valid workflow
+#     syntax — actionlint passes it — but that repository's tags carry a `v`, so
+#     the run dies with "Unable to resolve action". `pinact run --check` in CI is
+#     what turns that into a local failure instead of a pushed one.
+#
+# Defaults cover .github/workflows; nothing else here declares an action.
+version: 3
+
+# Wait a week before an update is eligible. A compromised release is usually
+# found and yanked within days, and nothing here needs the newest tag the hour
+# it lands.
+min_age:
+  value: 7

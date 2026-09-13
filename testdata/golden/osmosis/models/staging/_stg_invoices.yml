@@ -1,0 +1,18 @@
+version: 2
+models:
+  # Documented by hand, while the source it reads from is not. Backfill carries
+  # these descriptions back up into the billing source.
+  - name: stg_invoices
+    description: One row per invoice issued to a customer.
+    columns:
+      - name: invoice_id
+        description: Surrogate key for an invoice, assigned by the billing system.
+        data_type: INTEGER
+      - name: order_id
+        data_type: INTEGER
+      - name: invoice_total_cents
+        description: Invoice total in minor currency units, including tax.
+        data_type: INTEGER
+      - name: issued_on
+        description: Calendar date the invoice was issued, in UTC.
+        data_type: DATE

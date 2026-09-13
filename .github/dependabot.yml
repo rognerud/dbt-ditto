@@ -1,0 +1,30 @@
+# Action updates arrive as pull requests, not as a git hook.
+#
+# Pinning every `uses:` to a commit SHA (see .pinact.yaml) means an upstream
+# release is only picked up when somebody repoints the pin, and the reason to
+# repoint it is usually invisible locally: a deprecated runner, a fixed CVE, a
+# new major. Nothing in lefthook.yml can see that — pre-commit runs pinact with
+# --no-api precisely so a commit never depends on the network. Dependabot is the
+# half that does reach out: it understands SHA pins, bumps the SHA and rewrites
+# the trailing version comment, and CI gates the result like any other change.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # One action per pull request. Grouping would be quieter, but reviewing a
+    # SHA bump means looking at what that SHA contains, and a batch of six
+    # invites a rubber stamp.
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+    # Matches the min_age in .pinact.yaml: a compromised release is usually
+    # found and yanked within days, and nothing here needs the newest tag the
+    # hour it lands.
+    cooldown:
+      default-days: 7

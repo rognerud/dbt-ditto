@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+
+# Go build output, caches, test binaries and profiles
+/bin/
+/dist/
+/.gocache/
+/vendor/
+*.test
+*.out
+*.prof
+coverage.txt
+testdata/golden/osmosis-analytics-failure.log
+# dbt run state. Only manifest.json and catalog.json under testdata/*/target are
+# committed; the tests read nothing else dbt writes there.
+.dbt/
+testdata/projects/*/logs/
+testdata/projects/*/target/*
+!testdata/projects/*/target/manifest.json
+!testdata/projects/*/target/catalog.json
+
+# Generated fixture warehouse (scripts/build-fixture.sh rebuilds it)
+testdata/warehouse.duckdb
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local agent/tool state and private notes
+.claude/
+.agents/

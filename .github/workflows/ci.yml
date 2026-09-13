@@ -1,0 +1,257 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The Go suite needs no dbt, no Python and no warehouse, so it runs on both
+  # platforms the binary ships for.
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "not gofmt'd:" >&2
+            echo "${unformatted}" >&2
+            exit 1
+          fi
+        shell: bash
+
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build -o bin/dbt-ditto ./cmd/dbt-ditto
+
+  # Static analysis beyond `go vet`. The linter set and every exclusion is in
+  # .golangci.yml, next to the reason for it.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The action runs `config verify` itself before linting, so a setting that
+      # .golangci.yml spells wrong fails here. `make lint` does the same locally,
+      # which is the only way to find out before pushing.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+
+  # Known vulnerabilities, from two directions: govulncheck asks whether this
+  # code reaches a vulnerable symbol, Trivy asks what the dependency manifests
+  # declare. They disagree usefully — a module can be vulnerable and unreachable.
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: |
+          # GOTOOLCHAIN=auto for the install only: setup-go pins GOTOOLCHAIN to
+          # the version in go.mod, and govulncheck declares a newer Go than this
+          # module needs. The scan itself runs under this module's toolchain,
+          # which is what decides the stdlib version it reports on.
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # Covers uv.lock as well, which govulncheck cannot see: the source
+      # providers are Python.
+      - name: trivy
+        # The tags carry a v prefix; a bare 0.28.0 does not resolve.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: .gocache,.venv,dist,bin,testdata
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2
+
+  # The module graph has to be exactly what the source needs, and the checksums
+  # have to match what was resolved. Both are silent until someone looks.
+  modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go mod tidy leaves no diff
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go.mod / go.sum are not tidy; run 'go mod tidy'" >&2
+            exit 1
+          fi
+
+      - name: go mod verify
+        run: go mod verify
+
+  # A workflow only proves itself when it runs, which for a typo in a rarely
+  # taken branch can be months later.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: actionlint
+        run: |
+          # GOTOOLCHAIN=auto for the same reason as govulncheck and pinact: an
+          # `@latest` tool may declare a newer Go than go.mod's toolchain line.
+          GOTOOLCHAIN=auto go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          actionlint
+
+      # actionlint checks that a workflow is well-formed, not that the actions it
+      # names exist: `aquasecurity/trivy-action@0.28.0` is valid YAML, valid
+      # workflow syntax, and unresolvable, because that repository's tags carry a
+      # `v`. pinact resolves every `uses:` against GitHub and requires it to be a
+      # commit SHA — which also means a tag cannot be repointed at new code after
+      # someone reviewed it.
+      - name: actions are pinned and resolve
+        run: |
+          GOTOOLCHAIN=auto go install github.com/suzuki-shunsuke/pinact/v5/cmd/pinact@v5.0.0
+          pinact run --check
+        env:
+          # Without a token the API allows 60 requests an hour, shared by every
+          # job on the runner's address.
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # What actionlint and pinact do not look at: an expression interpolated
+      # into a `run:` block, a token with more scope than the job needs, a
+      # checkout that persists credentials into later steps.
+      - name: zizmor
+        run: uvx zizmor==1.30.1 --persona=regular .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Its own job so a failure reads as "this behaviour changed" rather than as one
+  # line in the middle of the suite.
+  features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The ```gherkin blocks in docs/ are the only copy of what the prose
+      # promises. Run first and named, so "the documentation stopped being true"
+      # is a line in the job list rather than something to go looking for.
+      - name: documentation is true
+        run: go test ./internal/features/ -run 'TestDocumentationIsTrue|TestExecutableBlocksAreFolded' -v
+
+      - name: behaviour specifications
+        run: go test ./internal/features/ -v
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: shellcheck
+        run: shellcheck scripts/*.sh scripts/lib/*.sh
+
+      # The Python here is the source providers and the packaging scripts: the
+      # code that reaches a warehouse with real credentials. It gets a linter,
+      # not just a syntax check. Pinned, so a ruff release cannot break CI on its
+      # own; lefthook.yml and the Makefile spell the same number.
+      - name: ruff
+        run: |
+          uvx ruff@0.16.7 check packaging scripts
+          uvx ruff@0.16.7 format --check packaging scripts
+
+  # The providers are Python. No warehouse is reached: this covers the contract,
+  # profiles.yml resolution and adapter type rendering. That dbt-ditto and a
+  # provider agree about the wire format is proved in Go, above.
+  providers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: ./scripts/providers.sh
+
+  # The real dbt-osmosis against dbt-ditto. `go test` replays the recorded
+  # result; only this catches dbt-osmosis changing under us.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: ./scripts/parity.sh --check

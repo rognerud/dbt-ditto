@@ -1,0 +1,25 @@
+version: 2
+
+seeds:
+  - name: raw_orders
+    description: Raw order lines, the documented root of this project.
+    columns:
+      - name: order_id
+        description: Surrogate key for an order.
+        meta:
+          owner: commerce-team
+        tags:
+          - primary_key
+      - name: customer_id
+        description: Surrogate key for a customer.
+        meta:
+          owner: platform-team
+          pii: false
+      - name: status
+        description: 'Order lifecycle state: one of completed, pending or returned.'
+        meta:
+          owner: commerce-team
+      - name: amount_cents
+        description: Order gross value in minor currency units.
+        meta:
+          owner: commerce-team

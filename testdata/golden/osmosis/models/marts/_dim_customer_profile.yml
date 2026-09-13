@@ -1,0 +1,21 @@
+version: 2
+models:
+  - name: dim_customer_profile
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+          tags:
+            - primary_key
+      - name: profile
+        data_type: STRUCT(first_name VARCHAR, last_name VARCHAR, signup_country VARCHAR)
+      - name: profile.first_name
+        data_type: VARCHAR
+      - name: profile.last_name
+        data_type: VARCHAR
+      - name: profile.signup_country
+        data_type: VARCHAR

@@ -1,0 +1,37 @@
+version: 2
+models:
+  - name: fct_orders
+    columns:
+      - name: order_id
+        description: Surrogate key for an order.
+        data_type: INTEGER
+        config:
+          meta:
+            owner: commerce-team
+          tags:
+            - primary_key
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+      - name: order_date
+        description: Calendar date the order was placed, in UTC.
+        data_type: DATE
+        config:
+          meta:
+            owner: commerce-team
+      - name: status
+        description: 'Order lifecycle state: one of completed, pending or returned.'
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: commerce-team
+      - name: amount_cents
+        description: Order gross value in minor currency units.
+        data_type: INTEGER
+        config:
+          meta:
+            owner: commerce-team

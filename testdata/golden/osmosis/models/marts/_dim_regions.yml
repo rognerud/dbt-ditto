@@ -1,0 +1,16 @@
+version: 2
+models:
+  # Documented downstream while everything upstream of it (raw_regions,
+  # stg_regions) is undocumented. Nothing may be erased here.
+  - name: dim_regions
+    description: One row per region the business sells into.
+    columns:
+      - name: region_code
+        description: ISO 3166-1 alpha-2 code for the region.
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: geo-team
+      - name: region_name
+        description: Human readable region name, in English.
+        data_type: VARCHAR

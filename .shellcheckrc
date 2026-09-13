@@ -1,0 +1,5 @@
+# The scripts in scripts/ source the shared helpers in scripts/lib/. Follow them
+# rather than reporting SC1091, resolving the paths from the directory of the
+# script doing the sourcing rather than from wherever shellcheck was run.
+external-sources=true
+source-path=SCRIPTDIR

@@ -1,0 +1,24 @@
+version: 2
+models:
+  - name: stg_source_orders
+    columns:
+      - name: order_id
+        description: CRM-native order identifier, not stable across reloads.
+        data_type: INTEGER
+        config:
+          meta:
+            owner: crm-team
+          tags:
+            - crm
+      - name: customer_id
+        data_type: INTEGER
+      - name: order_date
+        data_type: DATE
+      - name: status
+        description: CRM status code, before the commerce mapping is applied.
+        data_type: VARCHAR
+        config:
+          meta:
+            owner: crm-team
+      - name: amount_cents
+        data_type: INTEGER

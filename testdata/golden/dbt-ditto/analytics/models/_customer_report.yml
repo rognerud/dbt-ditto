@@ -1,0 +1,35 @@
+version: 2
+models:
+  - name: customer_report
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+            osmosis_progenitor: seed.platform.raw_customers
+          tags:
+            - primary_key
+      - name: signup_country
+        description: TODO
+        data_type: VARCHAR
+        config:
+          meta:
+            pii: true
+            owner: mart-team
+            sensitivity: low
+            osmosis_progenitor: model.platform.dim_customers
+          tags:
+            - mart_local
+      - name: lifetime_order_count
+        description: Number of orders the customer has ever placed.
+        data_type: BIGINT
+        config:
+          meta:
+            osmosis_progenitor: model.platform.dim_customers
+      - name: lifetime_value_cents
+        data_type: HUGEINT
+      - name: lifetime_value_eur
+        data_type: DOUBLE

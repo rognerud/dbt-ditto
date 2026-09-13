@@ -1,0 +1,17 @@
+version: 2
+models:
+  - name: fct_customer_totals
+    columns:
+      - name: customer_id
+        description: Surrogate key for a customer, unique and stable across exports.
+        data_type: INTEGER
+        config:
+          meta:
+            pii: false
+            owner: platform-team
+      - name: total_amount_cents
+        data_type: HUGEINT
+      - name: max_order_date
+        data_type: DATE
+      - name: order_id_count
+        data_type: BIGINT

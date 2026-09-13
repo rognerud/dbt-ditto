@@ -1,0 +1,16 @@
+# The same conservative project aimed at BigQuery, built against
+# bigquery-emulator in a container. See scripts/lib/dbt_fakebq.py for how dbt is
+# pointed at it. The emulator has no load-job support, so this project has no
+# seed: its documented root is a model that materialises rows inline.
+name: matrix
+version: "1.0.0"
+config-version: 2
+profile: matrix
+
+model-paths: ["models"]
+target-path: "target"
+
+models:
+  matrix:
+    +materialized: table
+    +dbt-osmosis: "_{model}.yml"
