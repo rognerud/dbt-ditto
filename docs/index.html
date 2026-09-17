@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dbt-ditto — column documentation propagation for dbt</title>
+<meta name="description" content="Propagates column documentation down the dbt graph and writes it back into your schema YAML. A single static Go binary: no dbt, no Python, no warehouse connection.">
+<link rel="icon" href="assets/logo.png">
+<style>
+  :root {
+    --ink: #1a202c;
+    --body: #4a5568;
+    --rule: #e2e8f0;
+    --accent: #f97316;
+    --code-bg: #f7f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    padding: 4rem 1.5rem 5rem;
+    max-width: 44rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--body);
+    background: #fff;
+  }
+  h1, h2 { color: var(--ink); line-height: 1.25; }
+  h1 {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin: 0 0 .5rem;
+    font-size: 2.25rem;
+  }
+  /* The logo is 40x33 pixel art. Scaling it smoothly turns it to mush, so it
+     is scaled in whole-pixel steps and left un-interpolated. */
+  h1 img { height: 2.25rem; image-rendering: pixelated; }
+  h2 {
+    margin: 3rem 0 .75rem;
+    font-size: 1.125rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #718096;
+  }
+  .lede { font-size: 1.15rem; margin: 0 0 1.5rem; }
+  a { color: #0369a1; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .9em;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .5rem 0; }
+  .badges img { height: 20px; vertical-align: middle; margin-right: .3rem; }
+  .cta { margin: 2rem 0; }
+  .cta a {
+    display: inline-block;
+    margin-right: .6rem;
+    padding: .6rem 1.2rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .cta a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-size: .9rem;
+    color: #718096;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #f7fafc; --body: #cbd5e0; --rule: #2d3748; --code-bg: #1a202c; }
+    body { background: #12161d; }
+    h2 { color: #a0aec0; }
+    a { color: #7dd3fc; }
+    footer { color: #a0aec0; }
+  }
+</style>
+</head>
+<body>
+
+<h1><img src="assets/logo.png" alt=""> dbt-ditto</h1>
+
+<p class="badges">
+  <a href="https://github.com/rognerud/dbt-ditto/actions/workflows/ci.yml"><img src="https://github.com/rognerud/dbt-ditto/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/go-1.24-00ADD8" alt="Go 1.24">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
+</p>
+
+<p class="lede">
+  Propagates column documentation down the dbt graph and writes it back into
+  your schema YAML. It reads the <code>manifest.json</code> and
+  <code>catalog.json</code> dbt already wrote, so it needs no dbt, no Python and
+  no warehouse connection — a single static Go binary.
+</p>
+
+<pre><code>uv add dbt-ditto                 # or: pip install dbt-ditto
+dbt-ditto inherit path/to/project</code></pre>
+
+<div class="cta">
+  <a class="primary" href="https://github.com/rognerud/dbt-ditto/blob/main/docs/usage.md">Get started</a>
+  <a href="https://github.com/rognerud/dbt-ditto">View on GitHub</a>
+</div>
+
+<h2>What it does</h2>
+<ul>
+  <li><strong>Inherits descriptions, meta and tags</strong> down the DAG, and syncs the
+    column list, data types and schema-file placement against the catalog.</li>
+  <li><strong>Reproduces dbt-osmosis byte for byte</strong>, reading your existing
+    <code>+dbt-osmosis:</code> path templates as-is. No migration.</li>
+  <li><strong>Crosses project boundaries</strong> for dbt-loom setups, reading
+    <code>dbt_loom.config.yml</code> so the upstream list is not maintained twice.</li>
+  <li><strong>Documents source tables</strong>, which inheritance can never reach, from
+    warehouse comments, backfill from downstream, or
+    <a href="https://github.com/rognerud/dbt-ditto/blob/main/docs/source-providers.md">source providers</a>
+    that ask the warehouse directly.</li>
+  <li><strong>Takes explicit instructions</strong> for renamed columns, and has a
+    <code>--check</code> mode that fails CI on stale documentation without writing.</li>
+</ul>
+
+<p>
+  An order of magnitude faster than dbt-osmosis, never re-parsing the project
+  (<a href="https://github.com/rognerud/dbt-ditto/blob/main/CONTRIBUTING.md#speed">benchmark</a>).
+  Active, pre-1.0.
+</p>
+
+<h2>Documentation</h2>
+<ul>
+  <li><a href="https://github.com/rognerud/dbt-ditto/blob/main/docs/usage.md">Usage</a>
+    — install, run, and every task it does.</li>
+  <li><a href="https://github.com/rognerud/dbt-ditto/blob/main/docs/configuration.md">Configuration</a>
+    — every setting and default.</li>
+  <li><a href="https://github.com/rognerud/dbt-ditto/blob/main/docs/source-providers.md">Source providers</a>
+    — raw tables from the warehouse.</li>
+  <li><a href="https://github.com/rognerud/dbt-ditto/blob/main/CONTRIBUTING.md">Contributing</a>
+    — build, test, parity proof, release.</li>
+</ul>
+
+<footer>
+  MIT licensed. Support is best-effort via
+  <a href="https://github.com/rognerud/dbt-ditto/issues">GitHub issues</a>.
+</footer>
+
+</body>
+</html>

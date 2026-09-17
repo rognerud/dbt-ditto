@@ -117,10 +117,20 @@ A release is publishing the draft
 on `main`, which creates the tag and starts `release.yml`. The version comes from
 merged PR labels, hence `.github/labels.yml`.
 
-The tag is created at `main`'s head, before the version bump, so `release.yml`
-rewrites `pyproject.toml` from the tag, commits that to `main`, then force-moves
-the tag onto the bump commit. Otherwise the tag points at a file claiming the
-previous version. Moving a tag is acceptable only seconds after publication.
+The tag is the only thing that states a version. Nothing in `release.yml` writes
+to the repository: `main` is protected, pull requests only, and a release does
+not get an exemption. `pyproject.toml` holds a permanent `0.0.0` placeholder —
+it is never built or published, and the wheels take their version from the tag
+in `packaging/pypi/build_wheels.py`.
+
+This replaced a bump that was committed to `main` and then force-moved the tag
+onto. Besides needing to push to a protected branch, it raced its own workflow:
+`build` and `assets` had already been handed the tag's original commit and
+failed with *the ref does not point to the expected commit*.
+
+`scripts/check-versions.sh` runs before anything is built and rejects a tag PyPI
+would not accept (PEP 440 — `v0.2.0` yes, `release-2` no). A tag cannot be taken
+back, so it gates the rest.
 
 PyPI uses trusted publishing, configured outside the repository, for `dbt-ditto`
 against workflow `release.yml` and environment `pypi`. No token is stored; the
