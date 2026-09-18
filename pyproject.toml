@@ -1,10 +1,16 @@
-# The local toolchain for `uv sync`, and the version string release.yml rewrites
-# from the tag (checked by scripts/check-versions.sh). The published wheels are
-# built by packaging/pypi/build_wheels.py and carry their own metadata; they
-# depend on nothing.
+# The local toolchain for `uv sync`, and nothing else. This file is never built
+# and never published: `package = false` below says so, and the wheels that do
+# reach PyPI are assembled by packaging/pypi/build_wheels.py, which takes its
+# version from the git tag and carries its own metadata.
+#
+# So the version below is a placeholder that stays at 0.0.0 forever. It used to
+# be bumped to match each tag, which meant a release had to push a commit to
+# `main` and then force-move the tag onto it — the one thing branch protection
+# is there to forbid. The tag is now the only thing that says what version a
+# release is.
 [project]
 name = "dbt-ditto"
-version = "0.0.2"
+version = "0.0.0"  # placeholder; the git tag is the version
 description = "Propagates column documentation down the dbt graph"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -15,6 +21,12 @@ dependencies = [
     "dbt-loom>=0.9.6",
     "dbt-osmosis>=1.5.0",
 ]
+
+# A virtual project: uv installs the dependencies into .venv and never tries to
+# build this repository as a Python distribution. Without it, `uv lock` hands
+# the tree to setuptools, which finds five top-level directories and refuses.
+[tool.uv]
+package = false
 
 [dependency-groups]
 dev = ["ruff>=0.16.7"]

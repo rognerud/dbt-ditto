@@ -175,12 +175,15 @@ dominated by opening files). What must not regress:
 | --- | --- | --- |
 | `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race, lint, ruff, shellcheck, workflow checks, provider tests, live parity diff |
 | `draft-release.yml`, `labeler.yml` | push to `main` | keep one draft release current, and its labels in sync |
-| `release.yml` | draft release **published** | version bump + tag move, archives, wheels, PyPI |
+| `release.yml` | draft release **published** | archives, wheels, PyPI |
+| `pages.yml` | push to `main` touching `docs/index.html` | copies the landing page to GitHub Pages |
 
-`scripts/check-versions.sh` gates a release on the tag and `pyproject.toml`
-agreeing. Publishing the draft creates the tag, and the tag is what ships; `main`
-is what CI proves. Mechanics and the PyPI setup that cannot be done from inside
-the repository: [AGENTS.md](AGENTS.md#releasing).
+Publishing the draft creates the tag, and the tag is what ships; `main` is what
+CI proves. No workflow pushes to `main` — it is protected, and a release is not
+an exception, so the tag is the only record of a version and `pyproject.toml`
+stays at a `0.0.0` placeholder. `scripts/check-versions.sh` runs first and
+refuses a tag PyPI would reject. Mechanics and the PyPI setup that cannot be
+done from inside the repository: [AGENTS.md](AGENTS.md#releasing).
 
 `packaging/pypi/build_wheels.py` produces one wheel per platform, each carrying
 the binary in the wheel's `.data/scripts/` directory, using only the standard

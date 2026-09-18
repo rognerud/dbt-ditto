@@ -7,6 +7,13 @@ name: release
 # The draft itself is maintained by draft-release.yml, which computes the
 # version from pull request labels. So the only manual act in a release is
 # pressing Publish on notes that have been accumulating since the last one.
+#
+# Nothing here writes to the repository. `main` is protected — pull requests
+# only — and a release used to violate that by pushing a version bump to it and
+# force-moving the freshly created tag onto the new commit. That also raced the
+# jobs below, which had already been handed the tag's original commit and
+# failed with "the ref does not point to the expected commit". The tag is now
+# the sole record of a version and is never moved.
 
 on:
   release:
@@ -21,20 +28,16 @@ permissions:
   contents: read
 
 jobs:
-  # pyproject.toml carries a version by hand and the tag is the authority, so
-  # the file is brought to the tag rather than the release being refused for
-  # disagreeing with it. `main` ends up recording what was released.
+  # Settles what is being released and refuses a tag PyPI would not accept. A
+  # tag is the one thing here that cannot be taken back, so nothing is built
+  # until this passes.
   version:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          ref: main
           persist-credentials: false
 
       - id: tag
@@ -42,46 +45,9 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.event.release.tag_name }}
 
-      - name: write the released version into the file that carries it
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          set -euo pipefail
-          version="${TAG#v}"
-          sed -i -E "0,/^version = \".*\"/s//version = \"${version}\"/" pyproject.toml
-
-      # Runs after the rewrite, so it is checking that the rewrite worked rather
-      # than that someone remembered. A tag is the one thing here that cannot be
-      # taken back, so nothing is built until this passes.
       - run: ./scripts/check-versions.sh "${STEPS_TAG_OUTPUTS_TAG}"
         env:
           STEPS_TAG_OUTPUTS_TAG: ${{ steps.tag.outputs.tag }}
-
-      # The tag was created at main's head, the commit *before* the bump above,
-      # so it would otherwise point at files claiming the previous version.
-      # Force-moving it is safe only because this runs seconds after the tag was
-      # created and before anything has been built from it.
-      # The checkout above keeps no credentials, so the token is handed to the
-      # two pushes directly rather than left in .git/config for every later
-      # step to use.
-      - name: commit the bump and bring the tag with it
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          if git diff --cached --quiet; then
-            echo "already at ${TAG}; nothing to move"
-            exit 0
-          fi
-          git commit -m "release ${TAG}"
-          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push "${remote}" HEAD:main
-          git tag -f "${TAG}"
-          git push -f "${remote}" "refs/tags/${TAG}"
 
   build:
     needs: version
