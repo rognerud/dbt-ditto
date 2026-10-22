@@ -312,6 +312,323 @@ Scenario: inheritance.progenitor_key renames the meta key that records the origi
 
 </details>
 
+## Tags, and the labels that carry a vocabulary
+
+`inheritance.tags` unions an ancestor's tags into the column's own, which is the
+right answer for a tag that is a name — `pii`, `nightly`. It is the wrong answer
+for a tag that is a *value*: a column fed by a public table and a confidential
+one must not end up both `data-sensitivity:public` and
+`data-sensitivity:confidential`.
+
+A rule names one label key and its vocabulary, weakest first, and collapses that
+key to a single value per column. The value comes from the whole set of
+ancestors, not the first one of each generation that a description takes, since
+picking the strongest is only meaningful across all of them. Rules read the key
+off a `key:value` tag and off the nested label map
+([`sources.labels`](source-providers.md#settings)) alike, so a project already
+routing warehouse labels into meta needs no second spelling.
+
+Three things outrank an inherited value, in this order:
+
+1. **a folder**, via `+tags:` in `dbt_project.yml` — the coarsest statement
+   anybody made on purpose;
+2. **the column**, via a tag or label somebody wrote on it;
+3. nothing else. Everything upstream is a *default*.
+
+The difference is recorded, not guessed: a value this tool resolved is listed in
+`meta: {dbt_ditto_label_defaults: [...]}`, and a value present on the column but
+absent from that list is canonical. So a default can be raised, lowered, or
+removed when upstream changes, and an explicit decision is never touched again.
+
+### Altering a value halfway down
+
+A column is often declassified on its way down the graph: an email is hashed, a
+salary is bucketed into a band, a row count replaces the rows. The model that
+does it is where the sensitivity changes, and writing the weaker value on that
+column is how you say so.
+
+By default (`inherit: cut`) that is also what everything *below* it inherits.
+Each branch is followed upwards only as far as the nearest ancestor that
+declares the key, because what fed that ancestor was the input to its decision,
+not a second opinion about it. The cut is per branch: a second, unaltered branch
+still carries its own source's classification the whole way down, and the ladder
+still decides between the branches that survive.
+
+Three consequences worth knowing:
+
+- An alteration must be a *declaration* to cut. A value a previous run wrote —
+  listed in `dbt_ditto_label_defaults` on that column — cuts nothing, so a stale
+  default cannot pin the graph below it.
+- A folder declaration cuts too, which is how `models/masked/` can declassify
+  everything in it without a tag per column.
+- `inherit: all` is the other reading: every ancestor is read, so a
+  classification upstream is a floor nothing downstream can write its way out
+  of. Choose it when the rule is a control rather than a description — and note
+  that the altered column itself still keeps its explicit value; what changes is
+  what the models below it see.
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `tags.folders` | `off` | `rules` reads `+tags:` from `dbt_project.yml` and lets a folder decide its ruled keys; `all` also writes every other folder tag onto every column below it |
+| `tags.rules[].key` | — | the label key the rule decides, e.g. `data-sensitivity` |
+| `tags.rules[].values` | — | the vocabulary, **weakest first**. A value outside it is reported and left where it was written |
+| `tags.rules[].resolve` | `strongest` | `weakest`, or `first` for the nearest branch, as a description is chosen |
+| `tags.rules[].inherit` | `cut` | `all` reads every ancestor, so a value written halfway down cannot weaken what the models below it inherit |
+| `tags.rules[].default` | none | the value to write when no ancestor carries the key at all. Still a default, so a later run may replace it |
+| `tags.rules[].write` | `tags` | `meta` writes under the label meta key instead; `both` writes both |
+
+A rule that cannot be acted on — no `values`, a `default` outside them, two
+rules for one key — stops the run rather than being resolved into a guess: what
+it would otherwise write is a claim about somebody's data.
+
+Folder tags accumulate the way dbt's own do, outermost first, rather than the
+nearest folder winning; `models:`, `seeds:`, `snapshots:` and `sources:` are
+each read for the resource type they configure.
+
+<details>
+<summary>A rule takes the strongest value its ancestors carry (+5 more)</summary>
+
+```gherkin
+Scenario: a rule takes the strongest value its ancestors carry
+  Given a dbt project
+  And a seed "raw_public" with columns:
+    | column | description          | tags                    |
+    | id     | Identifier of a row. | data-sensitivity:public |
+  And a seed "raw_private" with columns:
+    | column | description | tags                          |
+    | id     |             | data-sensitivity:confidential |
+  And a model "stg" reading from "raw_public" and "raw_private" with columns:
+    | column | description |
+    | id     |             |
+  And the file "models/_stg.yml":
+    """
+    version: 2
+    models:
+      - name: stg
+        columns:
+          - name: id
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg.yml" contains:
+    """
+    - data-sensitivity:confidential
+    """
+  And the file "models/_stg.yml" does not contain "data-sensitivity:public"
+  And the file "models/_stg.yml" contains:
+    """
+    dbt_ditto_label_defaults:
+    """
+
+Scenario: a value written on the column outranks a stricter ancestor
+  Given a dbt project
+  And a seed "raw" with columns:
+    | column | description          | tags                       |
+    | id     | Identifier of a row. | data-sensitivity:sensitive |
+  And a model "stg" reading from "raw" with columns:
+    | column | description | tags                      |
+    | id     |             | data-sensitivity:internal |
+  And the file "models/_stg.yml":
+    """
+    version: 2
+    models:
+      - name: stg
+        columns:
+          - name: id
+            tags:
+              - data-sensitivity:internal
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg.yml" contains:
+    """
+    - data-sensitivity:internal
+    """
+  And the file "models/_stg.yml" does not contain "data-sensitivity:sensitive"
+  And the file "models/_stg.yml" does not contain "dbt_ditto_label_defaults"
+
+Scenario: tags.folders lets dbt_project.yml decide, over anything upstream
+  Given a dbt project
+  And a seed "raw" with columns:
+    | column | description          | tags                       |
+    | id     | Identifier of a row. | data-sensitivity:sensitive |
+  And a model "stg" reading from "raw" with columns:
+    | column | description |
+    | id     |             |
+  And the file "models/_stg.yml":
+    """
+    version: 2
+    models:
+      - name: stg
+        columns:
+          - name: id
+    """
+  And the file "dbt_project.yml":
+    """
+    name: demo
+    version: "1.0.0"
+    config-version: 2
+    profile: demo
+    model-paths: ["models"]
+    seed-paths: ["seeds"]
+    models:
+      demo:
+        +tags: ["data-sensitivity:confidential"]
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      folders: rules
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg.yml" contains:
+    """
+    - data-sensitivity:confidential
+    """
+  And the file "models/_stg.yml" does not contain "data-sensitivity:sensitive"
+
+Scenario: tags.rules[].default applies when nothing upstream says anything, and write routes it
+  Given a dbt project
+  And a seed "raw" documenting "id" as "Identifier of a row."
+  And an undocumented model "stg" reading from "raw" with column "id"
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+          default: internal
+          write: meta
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg.yml" contains:
+    """
+    data-sensitivity: internal
+    """
+  And the file "models/_stg.yml" does not contain "- data-sensitivity:internal"
+
+Scenario: a value altered halfway down is what the models below it inherit
+  Given a dbt project
+  And a seed "raw" with columns:
+    | column | description        | tags                       |
+    | email  | The email address. | data-sensitivity:sensitive |
+  And a model "stg_hashed" reading from "raw" with columns:
+    | column | description | tags                      |
+    | email  |             | data-sensitivity:internal |
+  And a model "dim" reading from "stg_hashed" with columns:
+    | column | description |
+    | email  |             |
+  And the file "models/_stg_hashed.yml":
+    """
+    version: 2
+    models:
+      - name: stg_hashed
+        columns:
+          - name: email
+            tags:
+              - data-sensitivity:internal
+    """
+  And the file "models/_dim.yml":
+    """
+    version: 2
+    models:
+      - name: dim
+        columns:
+          - name: email
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_dim.yml" contains:
+    """
+    - data-sensitivity:internal
+    """
+  And the file "models/_dim.yml" does not contain "data-sensitivity:sensitive"
+
+Scenario: inherit all reads past the alteration, so a classification is a floor
+  Given a dbt project
+  And a seed "raw" with columns:
+    | column | description        | tags                       |
+    | email  | The email address. | data-sensitivity:sensitive |
+  And a model "stg_hashed" reading from "raw" with columns:
+    | column | description | tags                      |
+    | email  |             | data-sensitivity:internal |
+  And a model "dim" reading from "stg_hashed" with columns:
+    | column | description |
+    | email  |             |
+  And the file "models/_stg_hashed.yml":
+    """
+    version: 2
+    models:
+      - name: stg_hashed
+        columns:
+          - name: email
+            tags:
+              - data-sensitivity:internal
+    """
+  And the file "models/_dim.yml":
+    """
+    version: 2
+    models:
+      - name: dim
+        columns:
+          - name: email
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    tags:
+      rules:
+        - key: data-sensitivity
+          values: [public, internal, confidential, sensitive]
+          inherit: all
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_dim.yml" contains:
+    """
+    - data-sensitivity:sensitive
+    """
+```
+
+</details>
+
 ## What the column list looks like afterwards
 
 | Key | Default | Change it to… |

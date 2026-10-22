@@ -163,6 +163,41 @@ type LabelPropagate struct {
 	OnConflict *string `yaml:"on_conflict"`
 }
 
+// Tags configures the tag machinery that a plain union cannot express: where a
+// canonical tag comes from, and how a `key:value` label with an ordered
+// vocabulary — `data-sensitivity`, say — collapses to one value per column.
+type Tags struct {
+	// Folders reads `+tags:` out of dbt_project.yml's `models:`, `seeds:` and
+	// `snapshots:` trees and treats what it finds as canonical for the nodes below
+	// that folder: "off" (default), "rules" or "all".
+	Folders *string `yaml:"folders"`
+	// Rules are the label keys with an ordered vocabulary, resolved per column.
+	Rules []TagRule `yaml:"rules"`
+}
+
+// TagRule is one label key whose values form a ladder, so a column fed by
+// several ancestors ends up with one value rather than the union of theirs.
+type TagRule struct {
+	// Key is the label key the rule governs, read from tags and from meta alike.
+	Key string `yaml:"key"`
+	// Values is the vocabulary, weakest first. A value outside it is reported and
+	// left where it was written.
+	Values []string `yaml:"values"`
+	// Resolve picks between the values the ancestors carry: "strongest" (default),
+	// "weakest" or "first" (nearest generation, as a description is chosen).
+	Resolve *string `yaml:"resolve"`
+	// Inherit decides how far up a branch is read: "cut" (default) stops at the
+	// nearest ancestor that declares the key itself, so a value written halfway
+	// down the DAG is what everything below it inherits; "all" reads every
+	// ancestor, so an upstream classification cannot be weakened downstream.
+	Inherit *string `yaml:"inherit"`
+	// Default is written when no ancestor carries the key at all. Like any
+	// resolved value it is a default, so a later run may replace it.
+	Default *string `yaml:"default"`
+	// Write routes the resolved value: "tags" (default), "meta" or "both".
+	Write *string `yaml:"write"`
+}
+
 // Config is the whole dbt_ditto.yml.
 type Config struct {
 	Projects    []ProjectRef `yaml:"projects"`
@@ -171,6 +206,7 @@ type Config struct {
 	Organize    Organize     `yaml:"organize"`
 	Output      Output       `yaml:"output"`
 	Sources     Sources      `yaml:"sources"`
+	Tags        Tags         `yaml:"tags"`
 
 	// Loom reads dbt_loom.config.yml, on so the upstream list is not kept twice.
 	Loom *bool `yaml:"loom"`
@@ -214,6 +250,9 @@ func Load(path string) (*Config, error) {
 	c.Dir = filepath.Dir(abs)
 	if len(c.Projects) == 0 {
 		return nil, fmt.Errorf("%s: no projects configured", path)
+	}
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("%s:\n%w", path, err)
 	}
 	c.attachLoomUpstreams()
 	return c, nil
@@ -325,6 +364,91 @@ type Resolved struct {
 
 	SourcesStrict bool
 	SourceLabels  ResolvedLabels
+
+	FolderTags string
+	TagRules   []ResolvedTagRule
+}
+
+// Folder-tag modes.
+const (
+	// FolderTagsOff ignores dbt_project.yml's `+tags:` entirely, which is the
+	// default: nothing about a run changes until the folders are asked for.
+	FolderTagsOff = "off"
+	// FolderTagsRules lets a folder tag decide a rule's key and nothing else, so a
+	// folder declaring `data-sensitivity:confidential` does not also stamp every
+	// unrelated tag of that folder onto every column.
+	FolderTagsRules = "rules"
+	// FolderTagsAll writes every folder tag onto every column of the nodes below it.
+	FolderTagsAll = "all"
+)
+
+// How a rule picks between the values its ancestors carry.
+const (
+	ResolveStrongest = "strongest"
+	ResolveWeakest   = "weakest"
+	ResolveFirst     = "first"
+)
+
+// How far up a branch a rule reads.
+const (
+	// RuleInheritCut stops at the nearest ancestor that declares the key itself.
+	// What fed that ancestor was the input to its decision, not a second opinion
+	// about it, so a column masked or aggregated halfway down the DAG can carry a
+	// different value from the raw table it came from.
+	RuleInheritCut = "cut"
+	// RuleInheritAll reads every ancestor, so nothing downstream of a classified
+	// table can be written weaker than it.
+	RuleInheritAll = "all"
+)
+
+// Where a rule's resolved value is written.
+const (
+	TagRuleWriteTags = "tags"
+	TagRuleWriteMeta = "meta"
+	TagRuleWriteBoth = "both"
+)
+
+// ResolvedTagRule is a TagRule with its defaults filled in and its vocabulary
+// indexed, so comparing two values is a map lookup rather than a scan.
+type ResolvedTagRule struct {
+	Key                              string
+	Values                           []string
+	Resolve, Inherit, Default, Write string
+
+	// rank is the position of each value in Values, weakest lowest.
+	rank map[string]int
+}
+
+// Rank reports a value's strength, and whether the vocabulary knows it at all.
+func (r ResolvedTagRule) Rank(value string) (int, bool) {
+	i, ok := r.rank[value]
+	return i, ok
+}
+
+// ToTags and ToMeta report where a resolved value is written.
+func (r ResolvedTagRule) ToTags() bool {
+	return r.Write == TagRuleWriteTags || r.Write == TagRuleWriteBoth
+}
+
+func (r ResolvedTagRule) ToMeta() bool {
+	return r.Write == TagRuleWriteMeta || r.Write == TagRuleWriteBoth
+}
+
+// Cuts reports whether a branch stops at the nearest ancestor that declares the
+// key itself.
+func (r ResolvedTagRule) Cuts() bool { return r.Inherit == RuleInheritCut }
+
+// FolderTagsRead reports whether dbt_project.yml's `+tags:` are read at all.
+func (r Resolved) FolderTagsRead() bool { return r.FolderTags != FolderTagsOff }
+
+// TagRuleFor returns the rule governing a label key, if one is configured.
+func (r Resolved) TagRuleFor(key string) (ResolvedTagRule, bool) {
+	for _, rule := range r.TagRules {
+		if rule.Key == key {
+			return rule, true
+		}
+	}
+	return ResolvedTagRule{}, false
 }
 
 // Label routing modes.
@@ -452,6 +576,25 @@ func (c *Config) Resolve() Resolved {
 	// Reuse the skip-list mechanism rather than adding a second one.
 	if !r.SourceLabels.PropagateColumn && r.SourceLabels.Nested() {
 		r.SkipMetaKeys[r.SourceLabels.MetaKey] = true
+	}
+
+	// Off by default: reading dbt_project.yml's `+tags:` would otherwise change
+	// what an existing project writes the moment it upgraded.
+	r.FolderTags = strOr(c.Tags.Folders, FolderTagsOff)
+	for _, rule := range c.Tags.Rules {
+		resolved := ResolvedTagRule{
+			Key:     rule.Key,
+			Values:  rule.Values,
+			Resolve: strOr(rule.Resolve, ResolveStrongest),
+			Inherit: strOr(rule.Inherit, RuleInheritCut),
+			Default: strOr(rule.Default, ""),
+			Write:   strOr(rule.Write, TagRuleWriteTags),
+			rank:    make(map[string]int, len(rule.Values)),
+		}
+		for i, v := range rule.Values {
+			resolved.rank[v] = i
+		}
+		r.TagRules = append(r.TagRules, resolved)
 	}
 
 	r.Backfill = boolOr(c.Inheritance.Backfill.Enabled, false)

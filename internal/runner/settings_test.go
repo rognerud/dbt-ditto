@@ -585,7 +585,8 @@ func settingCases() []settingCase {
 				"dbt-osmosis' comment loss was not reproduced"),
 		},
 	}
-	return append(cases, sourceSettingCases()...)
+	cases = append(cases, sourceSettingCases()...)
+	return append(cases, tagSettingCases()...)
 }
 
 // upstreamManifest writes a bare upstream project — artifacts only, no

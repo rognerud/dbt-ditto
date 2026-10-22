@@ -147,7 +147,7 @@ func (w *world) aProject() error {
 
 // columns reads a `| column | description |` table into manifest columns. A
 // `meta` cell is inline YAML, so a scenario can declare the markers that live in
-// meta without a table per key.
+// meta without a table per key, and a `tags` cell is a comma-separated list.
 func columns(tbl *godog.Table) (map[string]any, error) {
 	if len(tbl.Rows) == 0 {
 		return nil, errors.New("the column table is empty")
@@ -175,6 +175,15 @@ func columns(tbl *godog.Table) (map[string]any, error) {
 				return nil, fmt.Errorf("parse the meta of column %q: %w", name, err)
 			}
 			col["meta"] = meta
+		}
+		if raw := cell["tags"]; raw != "" {
+			var tags []string
+			for _, t := range strings.Split(raw, ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					tags = append(tags, t)
+				}
+			}
+			col["tags"] = tags
 		}
 		out[name] = col
 	}

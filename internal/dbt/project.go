@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,11 +32,27 @@ type Project struct {
 
 	// pathRules maps a model path prefix (dot-joined fqn parts under `models:`)
 	pathRules []pathRule
+
+	// FolderTagRules are the `+tags:` declared in the same tree, by the same
+	// prefixes. Exported because what a folder declares is an input a caller may
+	// want to see without re-reading dbt_project.yml.
+	FolderTagRules []FolderTagRule
 }
 
 type pathRule struct {
 	prefix   []string // fqn segments below the project name, e.g. ["staging"]
 	template string
+}
+
+// FolderTagRule is one folder's `+tags:` out of dbt_project.yml.
+type FolderTagRule struct {
+	// Kind is the resource_type the section it was declared in configures, so the
+	// `models:` tree cannot tag a seed that happens to sit at the same fqn depth.
+	Kind string
+	// Prefix is the fqn segments below the project name the rule was declared at;
+	// empty means every node of that kind.
+	Prefix []string
+	Tags   []string
 }
 
 // projectYAML is the slice of dbt_project.yml we care about.
@@ -43,6 +61,7 @@ type projectYAML struct {
 	Models      map[string]any `yaml:"models"`
 	Seeds       map[string]any `yaml:"seeds"`
 	Snapshots   map[string]any `yaml:"snapshots"`
+	Sources     map[string]any `yaml:"sources"`
 	ProfileName string         `yaml:"profile"`
 }
 
@@ -94,13 +113,25 @@ func LoadProject(root, targetDir string, writable bool) (*Project, error) {
 
 	// The keys under `models:` are package names, and a node's fqn starts with its
 	// package too, so this project's own package is stripped from both sides.
-	for _, section := range []map[string]any{py.Models, py.Seeds, py.Snapshots} {
+	for _, s := range []struct {
+		kind    string
+		section map[string]any
+	}{
+		{"model", py.Models}, {"seed", py.Seeds},
+		{"snapshot", py.Snapshots}, {"source", py.Sources},
+	} {
+		section := s.section
 		if own, ok := section[p.Name].(map[string]any); ok {
-			collectPathRules(own, nil, &p.pathRules)
-			continue
+			section = own
 		}
-		collectPathRules(section, nil, &p.pathRules)
+		// Path templates are not read from `sources:`: a source is documented where
+		// its `sources:` block already lives, and is never moved.
+		if s.kind != "source" {
+			collectPathRules(section, nil, &p.pathRules)
+		}
+		collectTagRules(s.kind, section, nil, &p.FolderTagRules)
 	}
+	SortFolderTagRules(p.FolderTagRules)
 	return p, nil
 }
 
@@ -180,6 +211,99 @@ func collectPathRules(section map[string]any, prefix []string, out *[]pathRule) 
 		}
 		collectPathRules(child, append(prefix, k), out)
 	}
+}
+
+// tagConfigKeys carry a folder's tags. dbt itself only reads `+tags`; the
+// unprefixed spelling is accepted because dbt_project.yml allows it for any
+// config key, and a project that uses it means the same thing by it.
+var tagConfigKeys = []string{"+tags", "tags"}
+
+// collectTagRules walks the nested `models:` tree collecting every `+tags:`
+// against the fqn prefix it was declared at.
+func collectTagRules(kind string, section map[string]any, prefix []string, out *[]FolderTagRule) {
+	if section == nil {
+		return
+	}
+	for _, key := range tagConfigKeys {
+		v, ok := section[key]
+		if !ok {
+			continue
+		}
+		if tags := decodeTags(v); len(tags) > 0 {
+			*out = append(*out, FolderTagRule{Kind: kind, Prefix: append([]string(nil), prefix...), Tags: tags})
+		}
+		break
+	}
+	for k, v := range section {
+		if k != "" && k[0] == '+' {
+			continue
+		}
+		child, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		collectTagRules(kind, child, append(prefix, k), out)
+	}
+}
+
+// decodeTags accepts dbt's two spellings: a single tag, or a list of them.
+func decodeTags(v any) []string {
+	switch t := v.(type) {
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// SortFolderTagRules puts the shallowest folder first, so FolderTags returns a
+// project-wide tag before the tag of the folder that narrowed it, and the order
+// written into a file does not depend on map iteration.
+func SortFolderTagRules(rules []FolderTagRule) {
+	sort.SliceStable(rules, func(i, j int) bool {
+		if rules[i].Kind != rules[j].Kind {
+			return rules[i].Kind < rules[j].Kind
+		}
+		if len(rules[i].Prefix) != len(rules[j].Prefix) {
+			return len(rules[i].Prefix) < len(rules[j].Prefix)
+		}
+		return strings.Join(rules[i].Prefix, ".") < strings.Join(rules[j].Prefix, ".")
+	})
+}
+
+// FolderTags returns the `+tags:` every folder above a node declares, outermost
+// first. dbt accumulates these rather than letting the nearest one win, so this
+// does too: a node under `marts/finance` carries the tags of `marts` as well.
+func (p *Project) FolderTags(n *Node) []string {
+	if len(p.FolderTagRules) == 0 {
+		return nil
+	}
+	// fqn[0] is the package name; the rules are keyed below it.
+	fqn := n.FQN
+	if len(fqn) > 0 {
+		fqn = fqn[1:]
+	}
+	var out []string
+	for _, r := range p.FolderTagRules {
+		if r.Kind != n.ResourceType || len(r.Prefix) > len(fqn) {
+			continue
+		}
+		if slices.Equal(r.Prefix, fqn[:len(r.Prefix)]) {
+			out = UnionTags(out, r.Tags)
+		}
+	}
+	return out
 }
 
 // PathTemplate returns the YAML path template that applies to a node.

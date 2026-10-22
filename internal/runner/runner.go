@@ -50,6 +50,12 @@ type Report struct {
 
 // Run executes the whole pipeline.
 func Run(cfg *config.Config, opts Options) (*Report, error) {
+	// Checked here as well as in Load, so a configuration assembled in code — a
+	// test, or `inherit <dir>` — cannot reach the files with a rule that has no
+	// meaning.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	resolved := cfg.Resolve()
 	if !opts.Organize {
 		resolved.Organize = false

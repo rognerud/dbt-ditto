@@ -78,9 +78,10 @@ func (r *Resolver) labelDissent(rest []*dbt.Node, name string, keys [matchNone][
 		return "", false
 	}
 	dissent := ""
+	ruled := r.ruledKeys()
 	r.eachMatch(rest, name, keys, func(a *dbt.Node, c *dbt.Column) bool {
 		v, ok := c.EffectiveMeta().Get(key)
-		if ok && !sameLabels(v, won) {
+		if ok && !sameLabels(v, won, ruled) {
 			dissent = a.UniqueID
 			return false
 		}
@@ -90,17 +91,22 @@ func (r *Resolver) labelDissent(rest []*dbt.Node, name string, keys [matchNone][
 }
 
 // sameLabels compares two label maps by content, since they arrive as
-// *OrderedMap from the manifest and from a provider alike.
-func sameLabels(a, b any) bool {
+// *OrderedMap from the manifest and from a provider alike. Keys a rule decides
+// are skipped: the rule is the answer to that disagreement, so reporting it
+// would ask a question the configuration has already settled.
+func sameLabels(a, b any, ruled map[string]bool) bool {
 	am, aok := a.(*dbt.OrderedMap)
 	bm, bok := b.(*dbt.OrderedMap)
 	if !aok || !bok {
 		return reflect.DeepEqual(a, b)
 	}
-	if am.Len() != bm.Len() {
+	if countUnruled(am, ruled) != countUnruled(bm, ruled) {
 		return false
 	}
 	for _, k := range am.Keys() {
+		if ruled[k] {
+			continue
+		}
 		av, _ := am.Get(k)
 		bv, ok := bm.Get(k)
 		if !ok || !reflect.DeepEqual(av, bv) {
@@ -108,4 +114,17 @@ func sameLabels(a, b any) bool {
 		}
 	}
 	return true
+}
+
+func countUnruled(m *dbt.OrderedMap, ruled map[string]bool) int {
+	if len(ruled) == 0 {
+		return m.Len()
+	}
+	n := 0
+	for _, k := range m.Keys() {
+		if !ruled[k] {
+			n++
+		}
+	}
+	return n
 }
