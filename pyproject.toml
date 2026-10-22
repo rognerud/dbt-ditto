@@ -29,7 +29,7 @@ dependencies = [
 package = false
 
 [dependency-groups]
-dev = ["ruff>=0.16.7"]
+dev = ["ruff>=0.17.1"]
 
 # The Python here is the source providers and the packaging scripts. They are
 # what reaches a warehouse with real credentials, so they get the same treatment
