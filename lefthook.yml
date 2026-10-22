@@ -63,7 +63,7 @@ pre-commit:
       # Pinned so a new ruff release cannot start failing commits on its own.
       # ci.yml and the Makefile spell the same number.
       env: &ruff-env
-        RUFF_VERSION: "0.16.7"
+        RUFF_VERSION: "0.17.1"
       run: |
         if command -v uvx >/dev/null 2>&1; then
           uvx "ruff@${RUFF_VERSION}" format {staged_files}

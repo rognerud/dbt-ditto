@@ -106,6 +106,9 @@ type Resolver struct {
 
 	matchOnce sync.Once
 	match     *matcher
+
+	tagOnce sync.Once
+	tagTmpl tagTemplate
 }
 
 // matcher builds the column matcher on first use, so a zero Resolver works.
@@ -205,6 +208,9 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 
 		k := r.seedKnowledge(n, t.name, ex)
+		// Taken before inheritance overwrites the column's own labels, since telling
+		// an explicit value from an inherited one is the whole point of the rules.
+		localLabelled := r.snapshotLabels(&k)
 		if k.description == "" && t.comment != "" && r.useComment(n, t.name, ex) {
 			// A warehouse comment counts as hand-written documentation: it is kept,
 			// and nothing upstream overwrites it.
@@ -227,6 +233,8 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 			w.Node = n.UniqueID
 			doc.Warnings = append(doc.Warnings, w)
 		}
+		// Notes raised from here on are the rules'; the ones above are already out.
+		noted := len(k.notes)
 		definitive, settled := r.definitiveFor(t.name)
 		if settled {
 			// Decided in writing, so no longer worth reporting.
@@ -287,6 +295,14 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 				k.meta.Delete(r.Cfg.AmbiguityKey)
 			}
 		}
+		// Last, on the union inheritance produced: a rule's job is to collapse that
+		// union, and a folder or an explicit value to outrank it.
+		r.applyTagRules(&k, n, generations, t.name, r.matcher().keysFor(t.name), localLabelled)
+		for _, w := range k.notes[noted:] {
+			w.Node = n.UniqueID
+			doc.Warnings = append(doc.Warnings, w)
+		}
+
 		cd.Meta = entries(k.meta)
 		cd.Tags = k.tags
 		// Configured order, not map order, so a run writes the same bytes twice.
@@ -392,7 +408,8 @@ func (r *Resolver) inheritInto(k *knowledge, generations [][]*dbt.Node, name str
 				for _, mk := range em.Keys() {
 					// An ancestor's annotations describe its own column, not this one.
 					if r.Cfg.SkipMetaKeys[mk] || mk == r.Cfg.ProgenitorKey ||
-						mk == r.Cfg.AmbiguityKey || mk == DefinitiveKey {
+						mk == r.Cfg.AmbiguityKey || mk == DefinitiveKey ||
+						mk == LabelDefaultsKey {
 						continue
 					}
 					v, _ := em.Get(mk)

@@ -1,0 +1,11 @@
+==================== 2026-09-20T14:00:14.750475Z | 01a0bf1e-149d-7474-9e11-0f03316365eb ====================
+14:00:14.806922 [error]: [InvalidArgument (dbt1007)]: This will download and run the dbt v2 standalone installer, replacing the existing dbt-core binary in place at /Users/gislerognerud/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/bin:
+
+    curl -fsSL https://public.cdn.getdbt.com/fs/install/install.sh | sh -s -- --update --to /Users/gislerognerud/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/bin
+
+Proceed?
+
+This is not an interactive terminal, so this action can't be confirmed. Re-run with --yes to proceed automatically.
+14:00:16.518549 [info ]: 
+==================== Execution Summary =====================
+Finished 'system' with 1 error [1.8s]

@@ -59,7 +59,7 @@ TRIVY_VERSION       := latest
 PINACT_VERSION      := v5.0.0
 ZIZMOR_VERSION      := 1.30.1
 # Also spelled in lefthook.yml and .github/workflows/ci.yml.
-RUFF_VERSION        := 0.16.7
+RUFF_VERSION        := 0.17.1
 
 $(TOOLS)/golangci-lint: | $(TMPDIR)
 	GOBIN=$(TOOLS) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)

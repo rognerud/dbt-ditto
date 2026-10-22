@@ -12,7 +12,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST="${ROOT}/dist"
+# Overridable, and `rm -rf`'d below: dist/ also holds dist/pypi/ once the wheels
+# are built, so a run that could not be pointed elsewhere would delete them.
+DIST="${DIST:-${ROOT}/dist}"
 VERSION="${VERSION:-$(git -C "${ROOT}" describe --tags --always --dirty 2>/dev/null || echo dev)}"
 # `rev-parse HEAD` prints "HEAD" on a repository with no commits yet, so verify.
 COMMIT="$(git -C "${ROOT}" rev-parse -q --verify HEAD 2>/dev/null || echo unknown)"
@@ -20,7 +22,10 @@ COMMIT="$(git -C "${ROOT}" rev-parse -q --verify HEAD 2>/dev/null || echo unknow
 # bytes, which is what lets anyone verify a published binary. The two date
 # implementations disagree about how to render an epoch: GNU wants -d @seconds
 # and reads -r as a file path, BSD wants -r seconds and has no -d.
-EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+# Falling back to the commit's own time rather than the wall clock: `date +%s`
+# made every rebuild of a tag differ from the artefacts published for it, which
+# is the one thing a reproducible build is for.
+EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "${ROOT}" show -s --format=%ct 2>/dev/null || date +%s)}"
 DATE="$(date -u -d "@${EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
   || date -u -r "${EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -30,14 +35,9 @@ export TMPDIR="${TMPDIR:-${ROOT}/.gocache/tmp}"
 export CGO_ENABLED=0
 mkdir -p "${TMPDIR}"
 
-TARGETS=(
-  darwin/arm64
-  darwin/amd64
-  linux/amd64
-  linux/arm64
-  windows/amd64
-  windows/arm64
-)
+# Overridable as a space-separated list, so a check that only needs this
+# machine's archive does not pay for six cross-compiles.
+read -r -a TARGETS <<<"${TARGETS:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64}"
 
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
 
@@ -55,8 +55,12 @@ for target in "${TARGETS[@]}"; do
   stage="${DIST}/${name}"
   mkdir -p "${stage}"
 
+  # -buildvcs=false: otherwise the binary carries vcs.revision and
+  # vcs.modified, so a build from a dirty tree differs from a clean checkout of
+  # the same commit and one from a source tarball differs from both. The commit
+  # is in LDFLAGS already.
   GOOS="${os}" GOARCH="${arch}" go build \
-    -trimpath -ldflags "${LDFLAGS}" \
+    -trimpath -buildvcs=false -ldflags "${LDFLAGS}" \
     -o "${stage}/dbt-ditto${ext}" "${ROOT}/cmd/dbt-ditto"
 
   cp "${ROOT}/README.md" "${stage}/"
@@ -83,7 +87,7 @@ for target in "${TARGETS[@]}"; do
       fi
       tar "${own[@]}" -cf - "${name}" | gzip -n >"${name}.tar.gz"
     fi )
-  rm -rf "${stage}"
+  [[ -n "${KEEP_STAGE:-}" ]] || rm -rf "${stage}"
 
   # du rather than `ls -lh`: it reports the size directly instead of a column of
   # a listing, and -h is understood by both the BSD and GNU versions.
