@@ -335,6 +335,17 @@ Scenario: inheritance.node_description gives a model the description above it
 | `inheritance.ambiguity_meta` | `false` | `true` records the disagreement in the column's meta |
 | `inheritance.ambiguity_key` | `dbt_ditto_ambiguous` | rename that meta key |
 
+A column is annotated when this run inherited its description **or** when it
+already says word for word what an ancestor says — the same fact, recorded one
+run later. That matters on a project documented before dbt-ditto arrived: the
+descriptions are in `manifest.json`, so nothing is inherited, and an annotation
+that required inheriting would never appear on the projects most likely to want
+it. A wording no ancestor shares is the author's own and gets no annotation.
+
+The ambiguity annotation follows the same rule: it stands while the column still
+holds what the disagreement resolved to, and goes when somebody rewrites the
+description — that rewrite being their answer to it.
+
 <details>
 <summary>Inheritance.directives false makes a pointer into prose (+2 more)</summary>
 

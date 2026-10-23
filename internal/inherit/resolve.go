@@ -239,6 +239,11 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 
 		progenitor, competing := r.inheritInto(&k, generations, t.name)
+		// The ancestor the wording came from, kept past the point where a local
+		// description clears `progenitor`: a column already saying word for word
+		// what its parent says got that wording from somewhere, and on a project
+		// documented before dbt-ditto arrived that is the only record of it.
+		inheritedFrom := progenitor
 		for _, w := range k.notes {
 			w.Node = n.UniqueID
 			doc.Warnings = append(doc.Warnings, w)
@@ -298,8 +303,18 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 			cd.DataType, cd.SetDataType = t.dataType, true
 		}
 
-		if r.Cfg.Progenitor && r.Cfg.ProgenitorKey != "" && progenitor != "" {
-			k.meta.Set(r.Cfg.ProgenitorKey, progenitor)
+		if r.Cfg.Progenitor && r.Cfg.ProgenitorKey != "" {
+			// Either this run inherited the description, or the column already held
+			// exactly what an ancestor says — which is the same fact, recorded one
+			// run later. Only a wording that differs from every ancestor's is
+			// nobody's but the author's, and that gets no annotation.
+			from := progenitor
+			if from == "" && inherited != "" && final == inherited {
+				from = inheritedFrom
+			}
+			if from != "" {
+				k.meta.Set(r.Cfg.ProgenitorKey, from)
+			}
 		}
 
 		if r.Cfg.AmbiguityKey != "" {
