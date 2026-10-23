@@ -8,6 +8,13 @@ is enforced by a case in
 [`settings_test.go`](../internal/runner/settings_test.go);
 [`config.go`](../internal/config/config.go) is the source of truth.
 
+`dbt-ditto help config` prints the same list — every key, its default and one
+sentence on what it does — without leaving the terminal.
+[`settings.go`](../internal/config/settings.go) holds those sentences, and
+`TestEverySettingIsExplained` compares them against the config structs, so the
+two cannot drift. `dbt-ditto init` writes a starter file
+([usage.md](usage.md#the-config-file)).
+
 The ```gherkin blocks here run on every `go test`, against the real binary, so a
 key whose documented effect changed fails the build
 ([how](usage.md#using-dbt-ditto)). Each block writes the config file it is about
@@ -91,6 +98,107 @@ Scenario: projects[].target reads the artifacts from where CI left them
 | `inheritance.derived.aggregates` | `true` | `false` stops matching `total_amount_cents` to `amount_cents` |
 | `inheritance.derived.prefixes` | `sum`, `total`, `avg`, … | words stripped from the front before matching |
 | `inheritance.derived.suffixes` | `sum`, `count`, `cnt`, … | words stripped from the end. Dropping `count` stops `order_id_count` inheriting `order_id` |
+
+## What travels between tables
+
+A table has meta and tags of its own, and dbt-osmosis touches neither: it
+inherits column knowledge, and a node's `meta` is as likely to say who owns the
+model as to describe the data. Both are therefore off.
+
+| Key | Default | Change it to… |
+| --- | --- | --- |
+| `inheritance.node.meta` | `false` | `true` carries the table's own `meta` down the DAG |
+| `inheritance.node.tags` | `false` | `true` carries the table's own `tags` down the DAG |
+| `inheritance.node.from_parents` | `true` | `false` stops reading ancestor models, seeds and snapshots |
+| `inheritance.node.from_folders` | `true` | `false` stops reading `+meta:` and `+tags:` from `dbt_project.yml` |
+| `inheritance.node.from_sources` | `true` | `false` stops a raw table's classification travelling past the source entry |
+
+The three origins are weakest-last: **what the table says about itself**, then
+**the nearest ancestor** that says anything about a key, then **`dbt_project.yml`**,
+which is a default for everything below it. Meta merges key by key, so a table
+naming its own `owner` still inherits the `tier` it says nothing about; tags are
+an order-preserving union with the table's own first. `inheritance.force` does
+not apply: it is about a description somebody wrote, and replacing an owner with
+an upstream owner would destroy the one thing node meta is used for.
+
+A source is an ancestor like any other, so `from_sources` only decides whether
+that ancestor counts — with provider labels on a raw table, this is how a
+classification reaches the models built from it.
+
+<details>
+<summary>inheritance.node.meta carries the table's meta down, merged key by key (+2 more)</summary>
+
+```gherkin
+Scenario: inheritance.node.meta carries the table's meta down, merged key by key
+  Given a dbt project
+  And a seed "raw_orders" documenting "order_id" as "Surrogate key for an order."
+  And the node meta of "raw_orders" is:
+    """
+    tier: gold
+    owner: platform
+    """
+  And an undocumented model "stg_orders" reading from "raw_orders" with column "order_id"
+  And the file "models/_stg_orders.yml":
+    """
+    version: 2
+    models:
+      - name: stg_orders
+        meta:
+          owner: analytics
+        columns:
+          - name: order_id
+    """
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    inheritance:
+      node:
+        meta: true
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg_orders.yml" contains:
+    """
+    owner: analytics
+    tier: gold
+    """
+
+Scenario: the table's meta stays put by default
+  Given a dbt project
+  And a seed "raw_orders" documenting "order_id" as "Surrogate key for an order."
+  And the node meta of "raw_orders" is:
+    """
+    tier: gold
+    """
+  And an undocumented model "stg_orders" reading from "raw_orders" with column "order_id"
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg_orders.yml" does not contain "tier: gold"
+
+Scenario: inheritance.node.tags unions the table's tags, its own first
+  Given a dbt project
+  And a seed "raw_orders" documenting "order_id" as "Surrogate key for an order."
+  And the node tags of "raw_orders" are "nightly,finance"
+  And an undocumented model "stg_orders" reading from "raw_orders" with column "order_id"
+  And the file "dbt_ditto.yml":
+    """
+    projects:
+      - path: .
+    inheritance:
+      node:
+        tags: true
+    """
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And the file "models/_stg_orders.yml" contains, in order:
+    """
+    - nightly
+    - finance
+    """
+```
+
+</details>
 
 <details>
 <summary>Inheritance.columns false leaves the descriptions alone (+5 more)</summary>

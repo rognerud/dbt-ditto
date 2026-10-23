@@ -94,6 +94,8 @@ func initScenario(sc *godog.ScenarioContext) {
 	sc.Given(`^the warehouse reports for "([^"]*)":$`, w.theCatalog)
 	sc.Given(`^the artifacts are in "([^"]*)"$`, w.theArtifactsAreIn)
 	sc.Given(`^the node description of "([^"]*)" is "([^"]*)"$`, w.theNodeDescription)
+	sc.Given(`^the node meta of "([^"]*)" is:$`, w.theNodeMeta)
+	sc.Given(`^the node tags of "([^"]*)" are "([^"]*)"$`, w.theNodeTags)
 	sc.Given(`^an upstream project "([^"]*)" documenting "([^"]*)\.([^"]*)" as "([^"]*)"$`, w.anUpstreamProject)
 
 	sc.When(`^dbt-ditto runs$`, w.run)
@@ -106,6 +108,8 @@ func initScenario(sc *godog.ScenarioContext) {
 	sc.Then(`^the file "([^"]*)" does not contain "([^"]*)"$`, w.fileDoesNotContain)
 	sc.Then(`^the file "([^"]*)" lists entries in the order:$`, w.fileLists)
 	sc.Then(`^the file "([^"]*)" is gone$`, w.fileIsGone)
+	sc.Then(`^the file "([^"]*)" on disk contains:$`, w.onDiskContains)
+	sc.Then(`^there is no file "([^"]*)" on disk$`, w.notOnDisk)
 	sc.Then(`^the two runs are identical once canonicalised$`, w.runsAgreeCanonically)
 	sc.Then(`^changes are reported$`, w.changesReported)
 	sc.Then(`^no changes are reported$`, w.noChangesReported)
@@ -307,6 +311,37 @@ func (w *world) theNodeDescription(nodeName, description string) error {
 	for i := range w.nodes {
 		if w.nodes[i].id == w.nodeID(nodeName) {
 			w.nodes[i].body["description"] = description
+			return nil
+		}
+	}
+	return fmt.Errorf("no node named %q has been declared", nodeName)
+}
+
+// theNodeMeta and theNodeTags document the table itself rather than one of its
+// columns: a node's meta and tags are a separate thing to inherit, and the
+// manifest keeps them beside the description rather than inside `columns`.
+func (w *world) theNodeMeta(nodeName string, body *godog.DocString) error {
+	var meta map[string]any
+	if err := yaml.Unmarshal([]byte(body.Content), &meta); err != nil {
+		return fmt.Errorf("parse the meta of node %q: %w", nodeName, err)
+	}
+	return w.setNodeKey(nodeName, "meta", meta)
+}
+
+func (w *world) theNodeTags(nodeName, list string) error {
+	var tags []string
+	for _, t := range strings.Split(list, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return w.setNodeKey(nodeName, "tags", tags)
+}
+
+func (w *world) setNodeKey(nodeName, key string, value any) error {
+	for i := range w.nodes {
+		if w.nodes[i].id == w.nodeID(nodeName) {
+			w.nodes[i].body[key] = value
 			return nil
 		}
 	}
@@ -715,6 +750,35 @@ func (w *world) fileIsGone(rel string) error {
 	}
 	if body, ok := snap[rel]; ok {
 		return fmt.Errorf("%s still exists:\n%s", rel, body)
+	}
+	return nil
+}
+
+// onDiskContains reads the file as it is now, rather than from the snapshot of
+// schema files. A config is not a schema file — `canon.IsSchemaFile` excludes
+// it on purpose — so the steps about what `init` wrote need their own reader,
+// and asserting against the snapshot would pass whatever the command did.
+func (w *world) onDiskContains(rel string, want *godog.DocString) error {
+	raw, err := os.ReadFile(filepath.Join(w.dir, filepath.FromSlash(rel)))
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(want.Content), "\n") {
+		if !strings.Contains(string(raw), strings.TrimSpace(line)) {
+			return fmt.Errorf("%s does not contain %q:\n%s", rel, strings.TrimSpace(line), raw)
+		}
+	}
+	return nil
+}
+
+func (w *world) notOnDisk(rel string) error {
+	path := filepath.Join(w.dir, filepath.FromSlash(rel))
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		return fmt.Errorf("%s exists:\n%s", rel, raw)
+	}
+	if !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }

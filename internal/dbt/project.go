@@ -37,6 +37,10 @@ type Project struct {
 	// prefixes. Exported because what a folder declares is an input a caller may
 	// want to see without re-reading dbt_project.yml.
 	FolderTagRules []FolderTagRule
+
+	// FolderMetaRules are the `+meta:` declared in that tree, read for the same
+	// reason: a folder's meta is a claim about every node below it.
+	FolderMetaRules []FolderMetaRule
 }
 
 type pathRule struct {
@@ -53,6 +57,14 @@ type FolderTagRule struct {
 	// empty means every node of that kind.
 	Prefix []string
 	Tags   []string
+}
+
+// FolderMetaRule is one `+meta:` block declared in dbt_project.yml, against the
+// fqn prefix it governs.
+type FolderMetaRule struct {
+	Kind   string
+	Prefix []string
+	Meta   map[string]any
 }
 
 // projectYAML is the slice of dbt_project.yml we care about.
@@ -130,8 +142,10 @@ func LoadProject(root, targetDir string, writable bool) (*Project, error) {
 			collectPathRules(section, nil, &p.pathRules)
 		}
 		collectTagRules(s.kind, section, nil, &p.FolderTagRules)
+		collectMetaRules(s.kind, section, nil, &p.FolderMetaRules)
 	}
 	SortFolderTagRules(p.FolderTagRules)
+	SortFolderMetaRules(p.FolderMetaRules)
 	return p, nil
 }
 
@@ -265,6 +279,87 @@ func decodeTags(v any) []string {
 	default:
 		return nil
 	}
+}
+
+// metaConfigKeys carry a folder's meta, with the same two spellings as its
+// tags: dbt reads `+meta`, and a project that writes it unprefixed means the
+// same thing by it.
+var metaConfigKeys = []string{"+meta", "meta"}
+
+// collectMetaRules walks the nested tree collecting every `+meta:` against the
+// fqn prefix it was declared at, as collectTagRules does for `+tags:`.
+func collectMetaRules(kind string, section map[string]any, prefix []string, out *[]FolderMetaRule) {
+	if section == nil {
+		return
+	}
+	for _, key := range metaConfigKeys {
+		v, ok := section[key]
+		if !ok {
+			continue
+		}
+		if meta, ok := v.(map[string]any); ok && len(meta) > 0 {
+			*out = append(*out, FolderMetaRule{
+				Kind:   kind,
+				Prefix: append([]string(nil), prefix...),
+				Meta:   meta,
+			})
+		}
+		break
+	}
+	for k, v := range section {
+		if k != "" && k[0] == '+' {
+			continue
+		}
+		child, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		collectMetaRules(kind, child, append(prefix, k), out)
+	}
+}
+
+// SortFolderMetaRules orders the rules shallowest first, so a nearer folder's
+// value is applied after — and therefore wins over — the one it narrowed.
+func SortFolderMetaRules(rules []FolderMetaRule) {
+	sort.SliceStable(rules, func(i, j int) bool {
+		if rules[i].Kind != rules[j].Kind {
+			return rules[i].Kind < rules[j].Kind
+		}
+		if len(rules[i].Prefix) != len(rules[j].Prefix) {
+			return len(rules[i].Prefix) < len(rules[j].Prefix)
+		}
+		return strings.Join(rules[i].Prefix, ".") < strings.Join(rules[j].Prefix, ".")
+	})
+}
+
+// FolderMeta returns the `+meta:` every folder above a node declares, merged
+// outermost first so the nearest folder's value for a key wins. Unlike tags,
+// which accumulate, a meta key has one value and dbt lets the deeper
+// declaration replace it.
+func (p *Project) FolderMeta(n *Node) map[string]any {
+	if len(p.FolderMetaRules) == 0 {
+		return nil
+	}
+	fqn := n.FQN
+	if len(fqn) > 0 {
+		fqn = fqn[1:]
+	}
+	var out map[string]any
+	for _, r := range p.FolderMetaRules {
+		if r.Kind != n.ResourceType || len(r.Prefix) > len(fqn) {
+			continue
+		}
+		if !slices.Equal(r.Prefix, fqn[:len(r.Prefix)]) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(r.Meta))
+		}
+		for k, v := range r.Meta {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // SortFolderTagRules puts the shallowest folder first, so FolderTags returns a

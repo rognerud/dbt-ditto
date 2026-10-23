@@ -82,15 +82,6 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	res := &inherit.Resolver{Graph: graph, Cfg: resolved}
 
-	// Collected before anything is resolved: two declarations that disagree are a
-	// question only a person can answer, and asking halfway through would leave
-	// half the files written.
-	definitives, err := inherit.BuildDefinitives(graph, resolved.Fold)
-	if err != nil {
-		return nil, err
-	}
-	res.Definitives = definitives
-
 	targets := selectNodes(projects, opts.Select)
 	rep := &Report{NodesScanned: len(targets), Notes: notes}
 	rep.Warnings = append(rep.Warnings, shadowedSourceWarnings(shadowed, targets)...)
@@ -99,8 +90,41 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 	// after organising, then load every file involved in one parallel pass.
 	type placement struct {
 		node *dbt.Node
-		from string // repo-relative, empty when undocumented
+		from string // repo-relative, empty when the manifest knows of no schema file
 		to   string // repo-relative
+	}
+	// current is the file holding the node's documentation as it stands, which is
+	// not always the one the manifest names.
+	//
+	// `from` comes from `patch_path`, and that is only as old as the last
+	// `dbt parse`: a node documented since — by a person, or by a previous
+	// dbt-ditto run — has a schema file dbt has never seen, so `patch_path` is
+	// null and `from` is empty. Resolving such a node against nothing treats
+	// every key in that file as absent, and since the writer rebuilds `meta:`
+	// from what was resolved, the file's own meta is deleted and re-derived on
+	// every run. That is what removed a `dbt_ditto_definitive` somebody typed
+	// instead of settling the column with it.
+	//
+	// It can also be stale in the other direction: organising moves an entry and
+	// deletes the file it came from, while `patch_path` goes on naming that file
+	// until dbt parses again. Reading it then finds nothing, so every column
+	// looks new and every description is reported as an edit — against a file
+	// that ends up byte for byte identical, which is the "edits reported, no
+	// change in git" this used to produce on every run after the first.
+	//
+	// So the file holding the node's entry is the one that is read, whichever of
+	// the two that turns out to be.
+	current := func(p placement, files map[string]*yamlfile.File) *yamlfile.File {
+		for _, rel := range []string{p.from, p.to} {
+			if rel == "" {
+				continue
+			}
+			f := files[filepath.Join(p.node.Project.Root, rel)]
+			if f != nil && entryFor(f, p.node, false) != nil {
+				return f
+			}
+		}
+		return nil
 	}
 	placements := make([]placement, 0, len(targets))
 	pathSet := map[string]bool{}
@@ -138,19 +162,42 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 		files[paths[i]] = loaded[i]
 	}
 
+	// Collected once every file is read and before anything is resolved: the
+	// marker may have been typed into a schema file since the last `dbt parse`,
+	// so the manifest alone does not know about it; and two declarations that
+	// disagree are a question only a person can answer, which asking halfway
+	// through would leave half the files written.
+	var declared []inherit.Declared
+	for _, p := range placements {
+		if src := current(p, files); src != nil {
+			declared = append(declared, declaredDefinitives(src, p.node)...)
+		}
+	}
+	definitives, err := inherit.BuildDefinitives(graph, resolved.Fold, declared...)
+	if err != nil {
+		return nil, err
+	}
+	res.Definitives = definitives
+
 	// Resolving is the expensive part and only reads, so it runs in parallel.
 	docs := make([]*inherit.NodeDoc, len(placements))
 	par.Do(len(placements), func(i int) {
 		p := placements[i]
 		var existing inherit.Existing
-		if p.from != "" {
-			if src := files[filepath.Join(p.node.Project.Root, p.from)]; src != nil {
-				existing = readExisting(src, p.node)
-			}
+		if src := current(p, files); src != nil {
+			existing = readExisting(src, p.node)
 		}
 		docs[i] = res.Resolve(p.node, existing)
 	})
 
+	// changeAbs is the file each recorded change was made in, by absolute path,
+	// so the report can later be reconciled with what was actually written:
+	// Change.File is relative to its project, FilesWritten to the repository.
+	var changeAbs []string
+	record := func(abs string, c Change) {
+		rep.Changes = append(rep.Changes, c)
+		changeAbs = append(changeAbs, abs)
+	}
 	for i, p := range placements {
 		root := p.node.Project.Root
 		fromAbs := ""
@@ -171,7 +218,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 				if entry := entryFor(src, p.node, false); entry != nil {
 					carryOver(dst, p.node, entry)
 					removeEntry(src, p.node)
-					rep.Changes = append(rep.Changes, Change{
+					record(toAbs, Change{
 						Node:   p.node.UniqueID,
 						File:   p.to,
 						Detail: "moved from " + p.from,
@@ -182,7 +229,7 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 		wopts := writeOpts{cfg: resolved, configBlock: configBlockFor(p.node)}
 		for _, c := range writeDoc(dst, p.node, doc, wopts) {
-			rep.Changes = append(rep.Changes, Change{Node: p.node.UniqueID, File: p.to, Detail: c})
+			record(toAbs, Change{Node: p.node.UniqueID, File: p.to, Detail: c})
 		}
 	}
 
@@ -228,6 +275,26 @@ func Run(cfg *config.Config, opts Options) (*Report, error) {
 
 	sort.Strings(rep.FilesWritten)
 	sort.Strings(rep.FilesDeleted)
+
+	// The changes collected above are what the resolver decided to set, which is
+	// not the same as what the file ended up saying: setting a value a file
+	// already holds changes nothing. Reporting those too meant `-v` listed edits
+	// that nothing downstream — git included — could corroborate, so the ones
+	// against a file that was not written are dropped here rather than being
+	// explained away in the output.
+	touched := make(map[string]bool, len(outcomes))
+	for i, o := range outcomes {
+		if o.written || o.deleted {
+			touched[paths[i]] = true
+		}
+	}
+	kept := rep.Changes[:0]
+	for i, c := range rep.Changes {
+		if touched[changeAbs[i]] {
+			kept = append(kept, c)
+		}
+	}
+	rep.Changes = kept
 	return rep, nil
 }
 

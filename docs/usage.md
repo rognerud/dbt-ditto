@@ -19,6 +19,38 @@ go install github.com/rognerud/dbt-ditto/cmd/dbt-ditto@latest   # standalone
 
 The Python package is the binary itself and pulls in nothing.
 
+<details>
+<summary>A project needs no configuration to be documented (+1 more)</summary>
+
+```gherkin
+Scenario: a project needs no configuration to be documented
+  Given a dbt project
+  And a seed "raw_orders" documenting "order_id" as "Surrogate key for an order."
+  And an undocumented model "stg_orders" reading from "raw_orders" with column "order_id"
+  When I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And it warns "no dbt_ditto.yml found; using the dbt project in ."
+  And the file "models/_stg_orders.yml" contains:
+    """
+    description: Surrogate key for an order.
+    """
+
+Scenario: init writes the config, and the run then finds it
+  Given a dbt project
+  And a seed "raw_orders" documenting "order_id" as "Surrogate key for an order."
+  And an undocumented model "stg_orders" reading from "raw_orders" with column "order_id"
+  When I run `dbt-ditto init --yes`
+  And I run `dbt-ditto inherit`
+  Then the exit code is 0
+  And it does not print "no dbt_ditto.yml found"
+  And the file "models/_stg_orders.yml" contains:
+    """
+    description: Surrogate key for an order.
+    """
+```
+
+</details>
+
 ## Run it
 
 ```sh
@@ -53,10 +85,12 @@ Scenario: a project directory is the whole invocation
 | Command | What it does |
 | --- | --- |
 | `dbt-ditto inherit ./project` | one project, no config file |
-| `dbt-ditto inherit` | every project in the config file found upwards |
+| `dbt-ditto inherit` | every project in the config file found upwards, or the project the working directory sits in |
 | `dbt-ditto inherit --check` | CI gate: exit 1 if out of date, write nothing |
 | `dbt-ditto inherit --dry-run -v` | list every change it would make |
 | `dbt-ditto inherit --select 'stg_*,tag:nightly'` | limit the nodes |
+| `dbt-ditto init` | write a `dbt_ditto.yml` for the projects it finds |
+| `dbt-ditto help config` | every setting, its default and what it does |
 
 `--select` takes name globs, `tag:NAME` or `path:PREFIX`, comma-separated. Other
 flags: `-c PATH`, `--no-organize`, `--refresh-sources`, `--target NAME`
@@ -119,6 +153,17 @@ Needed only for more than one project, or to change a default. Searched upwards
 from the working directory: `dbt_ditto.yml`, `.yaml`, `.dbt_ditto.yml`, then
 `pyproject.toml` if it has a `[tool.dbt-ditto]` table (one without it is skipped,
 so packaging files never shadow a real config). `-c PATH` names one directly.
+
+Finding none, a bare `dbt-ditto inherit` uses the dbt project the working
+directory sits in — the same thing `inherit .` builds — and says so on stderr.
+A config that was found and will not parse is an error either way: running with
+defaults nobody asked for would be worse than stopping.
+
+`dbt-ditto init` writes the file from what is on disk: it finds the
+`dbt_project.yml` files below the working directory, asks which take part and
+which are only read, and leaves every other setting at its default. `--yes`
+accepts what it found without asking, which is what a container wants;
+`--stdout` prints it instead of writing; `--force` replaces one already there.
 
 ```yaml
 # dbt_ditto.yml

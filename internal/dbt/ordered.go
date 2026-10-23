@@ -177,9 +177,13 @@ func UnionTags(have, add []string) []string {
 	if len(add) == 0 {
 		return have
 	}
-	seen := make(map[string]bool, len(have)+len(add))
-	out := make([]string, 0, len(have)+len(add))
-	for _, t := range slices.Concat(have, add) {
+	// The capacities are sized from the concatenation rather than from
+	// len(have)+len(add): the sum is the arithmetic go/allocation-size-overflow
+	// objects to, and slices.Concat has already done it once, safely.
+	all := slices.Concat(have, add)
+	seen := make(map[string]bool, len(all))
+	out := make([]string, 0, len(all))
+	for _, t := range all {
 		if !seen[t] {
 			seen[t] = true
 			out = append(out, t)

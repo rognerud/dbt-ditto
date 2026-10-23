@@ -84,7 +84,10 @@ func (c *Catalog) Lookup(n *Node) (*CatalogNode, bool) {
 		return e, true
 	}
 	c.byRelationOnce.Do(func() {
-		c.byRelation = make(map[string]*CatalogNode, len(c.Nodes)+len(c.Sources))
+		// Sized from the nodes alone, not len(Nodes)+len(Sources): the sum is
+		// the arithmetic go/allocation-size-overflow objects to, and the
+		// capacity is only a hint — the sources grow the map by a rehash.
+		c.byRelation = make(map[string]*CatalogNode, len(c.Nodes))
 		for _, set := range []map[string]*CatalogNode{c.Nodes, c.Sources} {
 			for _, e := range set {
 				c.byRelation[relationKey(e.Metadata.Schema, e.Metadata.Name)] = e
