@@ -252,6 +252,74 @@ func settingCases() []settingCase {
 				"the node description was inherited by default"),
 			on: has("What the table as a whole holds.", "the node description was not inherited"),
 		},
+		// The node-level block. Every case here puts its marker on the seed the
+		// staging model is built from, or in dbt_project.yml, so what reaches
+		// `models/_stg.yml` is the table's own meta or tags and not a column's.
+		{
+			key:   "inheritance.node.meta",
+			claim: "carry the table's own meta down the DAG",
+			build: stageBuild(func(t *testing.T, s *stage) {
+				s.node(t, "seed.demo.raw")["meta"] = map[string]any{"tier": "gold"}
+			}),
+			set: func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Node.Meta = ptrTo(true) },
+			off: lacksIn("tier: gold", "the table's meta was inherited by default"),
+			on:  has("tier: gold", "the table's meta was not inherited"),
+		},
+		{
+			key:   "inheritance.node.tags",
+			claim: "carry the table's own tags down the DAG",
+			build: stageBuild(func(t *testing.T, s *stage) {
+				s.node(t, "seed.demo.raw")["tags"] = []string{"nightly"}
+			}),
+			set: func(_ *testing.T, c *config.Config, _ string) { c.Inheritance.Node.Tags = ptrTo(true) },
+			off: lacksIn("- nightly", "the table's tags were inherited by default"),
+			on:  has("- nightly", "the table's tags were not inherited"),
+		},
+		{
+			key:   "inheritance.node.from_parents",
+			claim: "read the ancestor models and seeds for the table's meta",
+			build: stageBuildCfg(func(t *testing.T, s *stage) {
+				s.node(t, "seed.demo.raw")["meta"] = map[string]any{"tier": "gold"}
+			}, func(c *config.Config) { c.Inheritance.Node.Meta = ptrTo(true) }),
+			set: func(_ *testing.T, c *config.Config, _ string) {
+				c.Inheritance.Node.FromParents = ptrTo(false)
+			},
+			off: has("tier: gold", "the seed's meta did not reach the model"),
+			on: lacksIn("tier: gold",
+				"the seed's meta was read with node.from_parents off"),
+		},
+		{
+			key:   "inheritance.node.from_folders",
+			claim: "read `+meta:` and `+tags:` out of dbt_project.yml",
+			build: stageBuildCfg(func(t *testing.T, s *stage) {
+				s.projectYAML += "models:\n  demo:\n    +meta:\n      domain: finance\n"
+			}, func(c *config.Config) { c.Inheritance.Node.Meta = ptrTo(true) }),
+			set: func(_ *testing.T, c *config.Config, _ string) {
+				c.Inheritance.Node.FromFolders = ptrTo(false)
+			},
+			off: has("domain: finance", "the folder's meta did not reach the model"),
+			on: lacksIn("domain: finance",
+				"the folder's meta was read with node.from_folders off"),
+		},
+		{
+			key:   "inheritance.node.from_sources",
+			claim: "read the source tables a model is built from",
+			build: stageBuildCfg(func(t *testing.T, s *stage) {
+				s.sources["source.demo.raw_src.orders"] = sourceNode("raw_src", "orders",
+					"models/_sources.yml", column("id", "An order id."))
+				s.sources["source.demo.raw_src.orders"].(map[string]any)["meta"] =
+					map[string]any{"classification": "restricted"}
+				s.node(t, "model.demo.stg")["depends_on"] = map[string]any{
+					"nodes": []string{"seed.demo.raw", "seed.demo.raw_alt", "source.demo.raw_src.orders"},
+				}
+			}, func(c *config.Config) { c.Inheritance.Node.Meta = ptrTo(true) }),
+			set: func(_ *testing.T, c *config.Config, _ string) {
+				c.Inheritance.Node.FromSources = ptrTo(false)
+			},
+			off: has("classification: restricted", "the source's meta did not reach the model"),
+			on: lacksIn("classification: restricted",
+				"the source's meta was read with node.from_sources off"),
+		},
 		{
 			key:   "inheritance.meta",
 			claim: "merge a column's meta down the DAG",

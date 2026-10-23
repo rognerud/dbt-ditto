@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,13 +27,16 @@ type ProjectRef struct {
 
 // Inheritance controls what gets copied down the DAG.
 type Inheritance struct {
-	Columns         *bool    `yaml:"columns"`
-	NodeDescription *bool    `yaml:"node_description"`
-	Meta            *bool    `yaml:"meta"`
-	Tags            *bool    `yaml:"tags"`
-	CaseInsensitive *bool    `yaml:"case_insensitive"`
-	Force           *bool    `yaml:"force"`
-	Placeholders    []string `yaml:"placeholders"`
+	Columns         *bool `yaml:"columns"`
+	NodeDescription *bool `yaml:"node_description"`
+	// Node carries the table's own meta and tags, as node_description carries its
+	// description.
+	Node            NodeInherit `yaml:"node"`
+	Meta            *bool       `yaml:"meta"`
+	Tags            *bool       `yaml:"tags"`
+	CaseInsensitive *bool       `yaml:"case_insensitive"`
+	Force           *bool       `yaml:"force"`
+	Placeholders    []string    `yaml:"placeholders"`
 	// Progenitor records the node a description came from in the column's meta.
 	Progenitor    *bool   `yaml:"progenitor"`
 	ProgenitorKey *string `yaml:"progenitor_key"`
@@ -54,6 +58,29 @@ type Inheritance struct {
 	Derived Derived `yaml:"derived"`
 	// Backfill takes documentation from downstream when there is none upstream.
 	Backfill Backfill `yaml:"backfill"`
+}
+
+// NodeInherit carries a table's own meta and tags, which dbt-osmosis never
+// touches: it inherits column knowledge, and a node's meta is as likely to be
+// ownership as a description of the data. Both switches are therefore off, and
+// turning either on opens three origins, each of which can be closed again.
+//
+// The origins are weakest-last: what the YAML says wins, then the nearest
+// ancestor that says anything, then dbt_project.yml. Meta merges key by key, so
+// a table that names its own owner still inherits the tier it says nothing
+// about; tags are an order-preserving union, local first, as a column's are.
+type NodeInherit struct {
+	Meta *bool `yaml:"meta"`
+	Tags *bool `yaml:"tags"`
+	// FromParents reads the ancestor models, seeds and snapshots.
+	FromParents *bool `yaml:"from_parents"`
+	// FromFolders reads `+meta:` and `+tags:` out of dbt_project.yml, which is
+	// where a team that classifies by folder has already said it.
+	FromFolders *bool `yaml:"from_folders"`
+	// FromSources reads the source tables a model is built from. A source is an
+	// ancestor like any other, so this only decides whether that ancestor counts:
+	// with it off, a classification on a raw table stops at the source entry.
+	FromSources *bool `yaml:"from_sources"`
 }
 
 // Backfill carries documentation *up* the DAG from a node's descendants, the
@@ -220,6 +247,15 @@ type Config struct {
 // Filenames searched when no config path is given, in order within a directory.
 var Filenames = []string{"dbt_ditto.yml", "dbt_ditto.yaml", ".dbt_ditto.yml", PyprojectFilename}
 
+// ErrNoConfig reports that the upward search ended without finding a config this
+// tool owns. It is distinct from a config that was found and would not parse,
+// because only the former is a reason to fall back to the project on disk.
+var ErrNoConfig = errors.New("no dbt_ditto.yml, and no [" + PyprojectTable + "] table in a " +
+	PyprojectFilename + ", found (searched upwards from the working directory)")
+
+// ProjectFilename is dbt's own config, and the only thing a single-project run needs.
+const ProjectFilename = "dbt_project.yml"
+
 // Load reads the config at path.
 func Load(path string) (*Config, error) {
 	if path == "" {
@@ -301,8 +337,52 @@ func discoverFrom(dir string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no dbt_ditto.yml, and no [%s] table in a %s, found (searched upwards from the working directory)",
-				PyprojectTable, PyprojectFilename)
+			return "", ErrNoConfig
+		}
+		dir = parent
+	}
+}
+
+// LoadOrProject loads the config, and when there is none to find falls back to
+// the dbt project the working directory sits in — the same thing
+// `dbt-ditto inherit <dir>` builds. Standing in a project and typing `inherit`
+// should not be an error when `inherit .` would have worked.
+//
+// Only a missing config falls back: one that was found and would not parse is
+// the user's own file to fix, and silently ignoring it would run with defaults
+// they did not ask for. An explicit -c never falls back either.
+func LoadOrProject(path string) (*Config, error) {
+	c, err := Load(path)
+	if err == nil || path != "" || !errors.Is(err, ErrNoConfig) {
+		return c, err
+	}
+
+	dir, wdErr := os.Getwd()
+	if wdErr != nil {
+		return nil, err
+	}
+	root, ok := ProjectRoot(dir)
+	if !ok {
+		return nil, err
+	}
+
+	c = Default(root)
+	where := Rel(dir, root)
+	c.Notes = append(c.Notes, fmt.Sprintf(
+		"no %s found; using the dbt project in %s\n      (run `dbt-ditto init` to configure several projects)",
+		Filenames[0], where))
+	return c, nil
+}
+
+// ProjectRoot walks upwards from dir for the directory holding dbt_project.yml.
+func ProjectRoot(dir string) (string, bool) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ProjectFilename)); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
 		}
 		dir = parent
 	}
@@ -341,10 +421,15 @@ const DefaultDirectivePrefix = "Inherited:"
 // deals with nil pointers.
 type Resolved struct {
 	InheritColumns, InheritNodeDescription, InheritMeta, InheritTags bool
-	CaseInsensitive, Force                                           bool
-	Progenitor, Directives, WarnAmbiguous, AmbiguityMeta             bool
-	ProgenitorKey, DirectivePrefix, AmbiguityKey                     string
-	Placeholders, SkipMetaKeys                                       map[string]bool
+
+	// Node-level meta and tags, and the origins they are read from.
+	NodeMeta, NodeTags                                bool
+	NodeFromParents, NodeFromFolders, NodeFromSources bool
+
+	CaseInsensitive, Force                               bool
+	Progenitor, Directives, WarnAmbiguous, AmbiguityMeta bool
+	ProgenitorKey, DirectivePrefix, AmbiguityKey         string
+	Placeholders, SkipMetaKeys                           map[string]bool
 
 	AddMissing, RemoveStale, DataTypes bool
 	ColumnCase, ColumnOrder            string
@@ -598,6 +683,17 @@ func (c *Config) Resolve() Resolved {
 			resolved.rank[v] = i
 		}
 		r.TagRules = append(r.TagRules, resolved)
+	}
+
+	// The two switches gate the origins, so `node.meta: true` is enough to get
+	// the behaviour somebody asking for it means, and an origin is only worth
+	// reading when something reads it.
+	r.NodeMeta = boolOr(c.Inheritance.Node.Meta, false)
+	r.NodeTags = boolOr(c.Inheritance.Node.Tags, false)
+	if r.NodeMeta || r.NodeTags {
+		r.NodeFromParents = boolOr(c.Inheritance.Node.FromParents, true)
+		r.NodeFromFolders = boolOr(c.Inheritance.Node.FromFolders, true)
+		r.NodeFromSources = boolOr(c.Inheritance.Node.FromSources, true)
 	}
 
 	r.Backfill = boolOr(c.Inheritance.Backfill.Enabled, false)

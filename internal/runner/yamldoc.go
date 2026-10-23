@@ -26,6 +26,10 @@ func readExisting(f *yamlfile.File, n *dbt.Node) inherit.Existing {
 	}
 	ex := inherit.Existing{
 		Description: yamlfile.StringOf(yamlfile.MapGet(entry, "description")),
+		// The node's entry carries meta and tags in the same two places a column's
+		// does, so the same readers do.
+		Meta: readMeta(entry),
+		Tags: readTags(entry),
 	}
 	eachColumn(entry, func(c *yaml.Node) {
 		ex.Columns = append(ex.Columns, inherit.ExistingColumn{
@@ -94,6 +98,32 @@ func readTags(entry *yaml.Node) []string {
 	return tags
 }
 
+// declaredDefinitives reads the `dbt_ditto_definitive` markers out of a node's
+// entry in a schema file, so one typed since the last `dbt parse` still settles
+// the column it was written on.
+func declaredDefinitives(f *yamlfile.File, n *dbt.Node) []inherit.Declared {
+	entry := entryFor(f, n, false)
+	if entry == nil {
+		return nil
+	}
+	var out []inherit.Declared
+	eachColumn(entry, func(c *yaml.Node) {
+		for _, e := range readMeta(c) {
+			if e.Key != inherit.DefinitiveKey {
+				continue
+			}
+			if b, ok := e.Value.(bool); ok && b {
+				out = append(out, inherit.Declared{
+					Node:        n.UniqueID,
+					Column:      columnName(c),
+					Description: yamlfile.StringOf(yamlfile.MapGet(c, "description")),
+				})
+			}
+		}
+	})
+	return out
+}
+
 // writeDoc applies a resolved NodeDoc to the destination file and returns a
 func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpts) []string {
 	if !doc.Changed() && entryFor(f, n, false) == nil && len(doc.Columns) == 0 {
@@ -105,6 +135,20 @@ func writeDoc(f *yamlfile.File, n *dbt.Node, doc *inherit.NodeDoc, opts writeOpt
 	if doc.SetDescription {
 		yamlfile.MapSet(entry, "description", yamlfile.Scalar(doc.Description))
 		changes = append(changes, "description inherited from "+doc.DescriptionFrom)
+	}
+	// Node-level meta and tags go where the node's own already are, which is the
+	// same decision `configBlock` makes for a column.
+	if doc.SetMeta {
+		setMeta(entry, doc.Meta, opts.configBlock)
+		changes = append(changes, "meta inherited")
+	}
+	if doc.SetTags {
+		setTags(entry, doc.Tags, opts.configBlock)
+		changes = append(changes, "tags inherited")
+	}
+	if doc.SetMeta || doc.SetTags {
+		// An entry rebuilt with a `config:` block ends with it, as a column's does.
+		yamlfile.MoveLast(entry, "config")
 	}
 	if !opts.cfg.InheritColumns {
 		return changes

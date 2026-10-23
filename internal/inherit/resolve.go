@@ -48,8 +48,14 @@ type NodeDoc struct {
 	SetDescription  bool
 	DescriptionFrom string
 
-	// No node-level Meta: dbt-osmosis inherits a node's description but not its
-	// meta, and matching it is the point. Column meta is on ColumnDoc.
+	// Meta and Tags are the table's own, resolved only when
+	// `inheritance.node.meta` or `.tags` is on: dbt-osmosis inherits column
+	// knowledge and leaves a node's meta alone, so the default resolves nothing
+	// and these stay empty. Column meta is on ColumnDoc.
+	Meta    []MetaEntry
+	SetMeta bool
+	Tags    []string
+	SetTags bool
 
 	// Columns is the full desired column list, in write order.
 	Columns []ColumnDoc
@@ -83,7 +89,7 @@ func (d *NodeDoc) warn(column, kind, format string, args ...any) {
 
 // Changed reports whether the resolution asks for any edit at all.
 func (d *NodeDoc) Changed() bool {
-	if d.SetDescription || len(d.Drop) > 0 {
+	if d.SetDescription || d.SetMeta || d.SetTags || len(d.Drop) > 0 {
 		return true
 	}
 	for _, c := range d.Columns {
@@ -125,11 +131,15 @@ type ExistingColumn struct {
 }
 
 // Existing is the current YAML state of a node, read from the schema file.
-// No node-level Meta, for the same reason NodeDoc has none: nothing inherits it,
-// so reading it would only be state that could drift.
 type Existing struct {
 	Description string
-	Columns     []ExistingColumn
+	// Meta and Tags are the node's own, which is what node-level inheritance
+	// must not overwrite. They are read whatever the settings say: reading is
+	// cheap, and a resolver that only sometimes knows the local state is harder
+	// to reason about than one that always does.
+	Meta    []MetaEntry
+	Tags    []string
+	Columns []ExistingColumn
 }
 
 // knowledge accumulates one column's view while walking ancestors, mirroring
@@ -254,6 +264,12 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 		}
 
 		// A column keeps its own description; only an empty one inherits.
+		// inherited is kept because the ambiguity annotation is about the graph,
+		// not about who wrote the line: once a description has been written into
+		// the file, a later run sees it as local and inherits nothing, and an
+		// annotation that depended on having just inherited would be deleted on
+		// the very next run.
+		inherited := k.description
 		final := k.description
 		if !r.Cfg.Force && local != "" {
 			final, progenitor = local, ""
@@ -286,10 +302,18 @@ func (r *Resolver) Resolve(n *dbt.Node, existing Existing) *NodeDoc {
 			k.meta.Set(r.Cfg.ProgenitorKey, progenitor)
 		}
 
-		if r.Cfg.AmbiguityMeta && r.Cfg.AmbiguityKey != "" {
+		if r.Cfg.AmbiguityKey != "" {
 			// Annotate only descriptions actually inherited under disagreement;
 			// settling locally clears `progenitor`, so drop the stale annotation.
-			if len(competing) > 0 && progenitor != "" {
+			// Turning the setting off drops it too: the annotation is this tool's
+			// own record of a disagreement, and one left behind by a previous run
+			// would outlive the run that is no longer making the claim.
+			// Annotated while the column still holds what the disagreement resolved
+			// to: either this run inherited it, or a previous one did and the
+			// wording is unchanged. A description somebody has since rewritten is
+			// their answer to the disagreement, and the annotation goes.
+			stillInherited := progenitor != "" || (inherited != "" && final == inherited)
+			if r.Cfg.AmbiguityMeta && len(competing) > 0 && stillInherited {
 				k.meta.Set(r.Cfg.AmbiguityKey, append([]string(nil), competing...))
 			} else {
 				k.meta.Delete(r.Cfg.AmbiguityKey)
@@ -361,25 +385,42 @@ func (r *Resolver) useComment(n *dbt.Node, name string, ex *ExistingColumn) bool
 	return ex == nil && n.Column(name, r.Cfg.CaseInsensitive) == nil
 }
 
-// seedKnowledge starts a column's knowledge from the node itself.
+// seedKnowledge starts a column's knowledge from the node itself: the manifest
+// entry, and the schema file on disk.
+//
+// Both are read, and the file wins on meta and tags. The manifest was written
+// by the last `dbt parse`, so anything added to the YAML since is missing from
+// it — and since the writer rebuilds `meta:` from what is resolved here, a key
+// read from the manifest alone is a key deleted from the file. That cost
+// `dbt_ditto_definitive` its entire purpose: a marker somebody typed was
+// removed by the next run instead of settling the column, because nothing
+// between the file and the rebuild had ever looked at it.
+//
+// The description is deliberately not merged the same way. Which description a
+// column starts from decides what counts as "documented locally", and so what
+// inheritance may overwrite; dbt-osmosis reads the manifest for that, and
+// parity depends on doing the same.
 func (r *Resolver) seedKnowledge(n *dbt.Node, name string, ex *ExistingColumn) knowledge {
 	k := knowledge{meta: dbt.NewOrderedMap()}
-	if mc := n.Column(name, r.Cfg.CaseInsensitive); mc != nil {
+	mc := n.Column(name, r.Cfg.CaseInsensitive)
+	if mc != nil {
 		k.description = mc.Description
 		if m := mc.EffectiveMeta(); m != nil {
 			k.meta = m.Clone()
 		}
 		k.tags = append(k.tags, mc.EffectiveTags()...)
 		k.extra = dbt.MergeExtra(nil, mc.Extra, r.Cfg.ExtraKeys, true)
+	}
+	if ex == nil {
 		return k
 	}
-	if ex != nil {
+	if mc == nil {
 		k.description = ex.Description
-		for _, e := range ex.Meta {
-			k.meta.Set(e.Key, e.Value)
-		}
-		k.tags = append(k.tags, ex.Tags...)
 	}
+	for _, e := range ex.Meta {
+		k.meta.Set(e.Key, e.Value)
+	}
+	k.tags = dbt.UnionTags(k.tags, ex.Tags)
 	return k
 }
 
@@ -520,6 +561,8 @@ func (r *Resolver) resolveNodeLevel(n *dbt.Node, existing Existing, doc *NodeDoc
 		!r.Cfg.IsPlaceholder(n.Description) {
 		doc.Description, doc.SetDescription = n.Description, true
 	}
+
+	r.resolveNodeMetaAndTags(n, existing, doc)
 
 	if !r.Cfg.InheritNodeDescription {
 		return

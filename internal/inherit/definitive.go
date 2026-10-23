@@ -54,16 +54,35 @@ func sameSpelling(claims []Definitive) bool {
 	return true
 }
 
-// BuildDefinitives collects every definitive declaration in the graph, keyed by folded
-// column name, and fails on a disagreement.
-func BuildDefinitives(g *Graph, fold func(string) string) (map[string]Definitive, error) {
+// Declared is a definitive marker found in a schema file rather than in the
+// manifest. The two can differ: the manifest was written by the last
+// `dbt parse`, and a marker typed since then exists only on disk. Reading both
+// is what makes the marker usable without re-parsing the project first.
+type Declared struct {
+	Node, Column, Description string
+}
+
+// BuildDefinitives collects every definitive declaration — in the graph, and in
+// the schema files the caller has read — keyed by folded column name, and fails
+// on a disagreement.
+func BuildDefinitives(g *Graph, fold func(string) string, declared ...Declared) (map[string]Definitive, error) {
 	claims := map[string][]Definitive{}
+	// The file first: where a node declares the marker in both, the two agree,
+	// and where they disagree the file is the newer of the two.
+	seen := map[string]bool{}
+	for _, d := range declared {
+		claims[fold(d.Column)] = append(claims[fold(d.Column)], Definitive(d))
+		seen[d.Node+"\x00"+fold(d.Column)] = true
+	}
 	for _, n := range g.Nodes {
 		if n.Project != nil && n.Project.ManifestOnly {
 			continue
 		}
 		for _, c := range n.Columns {
 			if c == nil || !isDefinitive(c) {
+				continue
+			}
+			if seen[n.UniqueID+"\x00"+fold(c.Name)] {
 				continue
 			}
 			claims[fold(c.Name)] = append(claims[fold(c.Name)], Definitive{

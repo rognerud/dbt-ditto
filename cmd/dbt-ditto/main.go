@@ -12,6 +12,7 @@ import (
 
 	"github.com/rognerud/dbt-ditto/internal/config"
 	"github.com/rognerud/dbt-ditto/internal/runner"
+	"github.com/rognerud/dbt-ditto/internal/scaffold"
 )
 
 // Stamped at build time with -ldflags "-X main.version=...".
@@ -64,6 +65,8 @@ const usage = `dbt-ditto - dbt documentation inheritance, across projects
 
 Usage:
   dbt-ditto inherit [flags] [project-dir]
+  dbt-ditto init [flags]
+  dbt-ditto help config
   dbt-ditto version
 
 Propagates column documentation down the dbt DAG and writes it back into schema
@@ -72,9 +75,10 @@ Several projects can take part at once, so a model inherits from a model in
 another repository.
 
 Reads dbt_ditto.yml, or a [tool.dbt-ditto] table in pyproject.toml, searched for
-upwards from the working directory, unless a project directory is given, in
-which case that one project is used with the ` + "`+dbt-osmosis:`" + ` rules already in
-its dbt_project.yml.
+upwards from the working directory. Given a project directory that one project
+is used instead, with the ` + "`+dbt-osmosis:`" + ` rules already in its dbt_project.yml.
+With neither, the dbt project the working directory sits in is used, and a note
+says so; ` + "`dbt-ditto init`" + ` writes a config for more than one project.
 
 Flags:
   -c, --config PATH   path to dbt_ditto.yml or pyproject.toml
@@ -90,10 +94,32 @@ Flags:
       --target NAME      the profiles.yml target providers connect with
                          (default: $DBT_TARGET, else the profile's own default)
 
+init flags:
+  -y, --yes           accept the projects it finds, ask nothing
+      --force         replace a dbt_ditto.yml that is already there
+      --stdout        print the config instead of writing it
+
+Configuration:
+  Every key is optional, and the defaults reproduce dbt-osmosis. The sections:
+
+  projects      the dbt projects taking part, and which are only read
+  inheritance   what travels down the DAG, and the matching that decides where
+  columns       reconciliation against the warehouse catalog: adds, removals,
+                data types, case and order
+  organize      which schema file a model's entry belongs in
+  output        the shape of what is written, YAML comments included
+  sources       external programs that document raw tables, and label routing
+  tags          folder tags, and the label vocabularies a column resolves to one
+  loom          whether dbt_loom.config.yml supplies the upstream manifests
+
+  Every key, its default and what it does:  dbt-ditto help config
+
 Examples:
   dbt-ditto inherit projects/platform
   dbt-ditto inherit --check
   dbt-ditto inherit --select 'stg_*,tag:nightly' --verbose
+  dbt-ditto init
+  dbt-ditto init --yes --stdout
 `
 
 // notes prints remarks about the run, which belong on stderr with the warnings.
@@ -110,6 +136,34 @@ func main() {
 	}
 }
 
+// initConfig writes a starter dbt_ditto.yml. It takes a directory to scan, so
+// the command works from outside the tree it is describing.
+func initConfig(args []string) error {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+
+	var opts scaffold.Options
+	fs.BoolVar(&opts.Yes, "yes", false, "accept the projects it finds")
+	fs.BoolVar(&opts.Yes, "y", false, "accept the projects it finds")
+	fs.BoolVar(&opts.Force, "force", false, "replace an existing config")
+	fs.BoolVar(&opts.Stdout, "stdout", false, "print the config instead of writing it")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("expected at most one directory, got %d", fs.NArg())
+	}
+	opts.Dir = fs.Arg(0)
+
+	// A pipe or a CI log is not something to ask a question on, and a read from it
+	// would either block forever or answer the question itself.
+	if info, err := os.Stdin.Stat(); err == nil {
+		opts.Interactive = info.Mode()&os.ModeCharDevice != 0
+	}
+	return scaffold.Run(opts)
+}
+
 func run(args []string) error {
 	if len(args) == 0 {
 		fmt.Print(usage)
@@ -121,8 +175,18 @@ func run(args []string) error {
 		fmt.Println(versionString())
 		return nil
 	case "help", "--help", "-h":
+		// `help config` is the whole settings reference. It is a subcommand rather
+		// than part of the usage text because sixty keys with an explanation each
+		// would bury the four flags somebody typing --help is usually after.
+		if len(args) > 1 && (args[1] == "config" || args[1] == "configuration") {
+			return config.SettingsHelp(os.Stdout)
+		}
 		fmt.Print(usage)
 		return nil
+	case "config":
+		return config.SettingsHelp(os.Stdout)
+	case "init":
+		return initConfig(args[1:])
 	case "inherit":
 	default:
 		return fmt.Errorf("unknown command %q (try `dbt-ditto help`)", args[0])
@@ -172,7 +236,7 @@ func run(args []string) error {
 	if len(positional) > 0 {
 		cfg = config.Default(positional[0])
 	} else {
-		cfg, err = config.Load(cfgPath)
+		cfg, err = config.LoadOrProject(cfgPath)
 		if err != nil {
 			return err
 		}
