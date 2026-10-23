@@ -131,3 +131,46 @@ func TestEveryReportedChangeNamesATouchedFile(t *testing.T) {
 		}
 	}
 }
+
+// On a project documented before dbt-ditto arrived, the descriptions are in the
+// manifest, so nothing is inherited and `inheritance.progenitor` had nothing to
+// record — the setting looked inert on exactly the projects most likely to turn
+// it on. A column already saying word for word what its parent says got that
+// wording from that parent, and is annotated as such.
+func TestProgenitorAnnotatesAWordingAnAncestorAlreadyHas(t *testing.T) {
+	dir, cfg := writeStage(t, func(s *stage) {
+		// The manifest knows the description, as it would after `dbt parse`, and
+		// it is the seed's wording exactly.
+		s.node(t, "model.demo.stg")["columns"] = map[string]any{
+			"ID": map[string]any{"name": "ID", "description": "Identifier of the row."},
+		}
+		s.files["models/_stg.yml"] = "version: 2\nmodels:\n  - name: stg\n    columns:\n" +
+			"      - name: ID\n        description: Identifier of the row.\n"
+	})
+	if _, err := runner.Run(cfg, runner.Options{Organize: true}); err != nil {
+		t.Fatal(err)
+	}
+	block := columnEntry(t, readFile(t, dir, "models/_stg.yml"), "ID")
+	if !strings.Contains(block, config.DefaultProgenitorKey+": seed.demo.raw") {
+		t.Errorf("no progenitor recorded for a wording the seed already has:\n%s", block)
+	}
+}
+
+// A description nobody upstream shares is the author's own, and claiming an
+// ancestor for it would be a lie about where it came from.
+func TestProgenitorLeavesAnOriginalWordingAlone(t *testing.T) {
+	dir, cfg := writeStage(t, func(s *stage) {
+		s.node(t, "model.demo.stg")["columns"] = map[string]any{
+			"ID": map[string]any{"name": "ID", "description": "What this table means by an id."},
+		}
+		s.files["models/_stg.yml"] = "version: 2\nmodels:\n  - name: stg\n    columns:\n" +
+			"      - name: ID\n        description: What this table means by an id.\n"
+	})
+	if _, err := runner.Run(cfg, runner.Options{Organize: true}); err != nil {
+		t.Fatal(err)
+	}
+	block := columnEntry(t, readFile(t, dir, "models/_stg.yml"), "ID")
+	if strings.Contains(block, config.DefaultProgenitorKey) {
+		t.Errorf("a hand-written wording was attributed to an ancestor:\n%s", block)
+	}
+}
