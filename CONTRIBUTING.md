@@ -175,8 +175,24 @@ dominated by opening files). What must not regress:
 | --- | --- | --- |
 | `ci.yml` | push to `main`, PR | gofmt, vet, tests on Linux and macOS, race, lint, ruff, shellcheck, workflow checks, provider tests, live parity diff |
 | `draft-release.yml`, `labeler.yml` | push to `main` | keep one draft release current, and its labels in sync |
-| `release.yml` | draft release **published** | archives, wheels, PyPI |
+| `prerelease.yml` | after `draft-release.yml` on `main` | publishes the next version's release candidate: `v0.0.4rc1`, `rc2`, … |
+| `release.yml` | release **published** (candidate or stable) | archives, wheels, PyPI |
 | `pages.yml` | push to `main` touching `docs/index.html` | copies the landing page to GitHub Pages |
+
+Every merge to `main` is therefore installable by name, without waiting for
+anyone to press Publish:
+
+```sh
+uv add dbt-ditto --prerelease=allow     # or: pip install --pre dbt-ditto
+```
+
+A candidate takes its version from the draft — where the pull request labels
+have already been turned into a number — and appends the candidate count, which
+is read from the tags rather than stored anywhere. `rc`, not `r1`: in PEP 440
+`-r1` is a *post*-release, so `v0.0.4-r1` means *after* 0.0.4 rather than before
+it, and `check-versions.sh` rejects it outright. Pre-releases are excluded from
+release-drafter's version resolution and from GitHub's "Latest", so they cannot
+move the stable version along, and PyPI serves them only to `--pre`.
 
 Publishing the draft creates the tag, and the tag is what ships; `main` is what
 CI proves. No workflow pushes to `main` — it is protected, and a release is not
