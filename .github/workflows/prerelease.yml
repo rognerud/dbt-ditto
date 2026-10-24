@@ -1,0 +1,190 @@
+name: prerelease
+
+# Every merge to `main` publishes a release candidate of whatever version is
+# coming next: v0.0.4rc1, then rc2, then rc3, until the stable v0.0.4 is cut by
+# publishing the draft (release.yml). So `main` is always installable by name
+# without waiting for someone to press Publish.
+#
+# The version comes from the draft release-drafter maintains, which is where the
+# pull request labels have already been turned into a version. This workflow
+# only appends the candidate number, because release-drafter cannot: its
+# `prerelease-identifier` emits semver (0.0.4-rc.0), and PyPI wants PEP 440
+# (0.0.4rc1), which scripts/check-versions.sh enforces before anything is built.
+#
+# Publishing the release creates the tag, and that is what starts release.yml —
+# the same path a stable release takes, so a candidate is built, attached and
+# pushed to PyPI by exactly the code that builds a release. Nothing here writes
+# to the repository other than the tag the release brings with it.
+
+on:
+  # After draft-release.yml, not beside it: both would otherwise race on the
+  # same push, and this one needs the draft that one has just recomputed.
+  #
+  # workflow_run is dangerous when a workflow runs with the base repository's
+  # write permissions and then checks out and executes code from the run that
+  # triggered it, because that run may have been a pull request from a fork.
+  # The guard on the job below is what makes this one safe: it proceeds only
+  # for `event == 'push'` on `head_branch == 'main'`, and only this repository
+  # can push to its own main, which is protected and takes pull requests only.
+  # A fork's pull request triggers draft-release.yml through
+  # pull_request_target, which that condition excludes — even when the fork's
+  # branch happens to be called main.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["draft release"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Not cancel-in-progress: a cancelled run here could leave a tag with no
+  # release on it, and a tag cannot be taken back.
+  group: prerelease
+  cancel-in-progress: false
+
+jobs:
+  prerelease:
+    # draft-release.yml also runs on pull_request_target, and those runs must
+    # not cut a release candidate of a branch that has not landed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the release, which is what creates the tag.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history and every tag: the candidate number is one more
+          # than the highest candidate already tagged for this version.
+          fetch-depth: 0
+          # The commit that triggered the drafter run, so the tag names the
+          # merge it is a candidate of rather than whatever main points at by
+          # the time this runs.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      # The next stable version, as the draft states it. Falling back to a patch
+      # bump of the last stable release means a missing or malformed draft
+      # delays nothing: the worst case is a candidate numbered more
+      # conservatively than the labels asked for.
+      - id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # bump prints the next patch version after the one it is given, and
+          # treats an unreadable or empty version as the start of the line.
+          bump() {
+            local version major minor patch part
+            version="${1#v}"
+            IFS='.' read -r major minor patch <<<"${version}"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            for part in "${major}" "${minor}" "${patch}"; do
+              if [[ ! "${part}" =~ ^[0-9]+$ ]]; then
+                echo "::error::cannot read a version out of ${1:-an empty release list}" >&2
+                return 1
+              fi
+            done
+            echo "v${major}.${minor}.$(( patch + 1 ))"
+          }
+
+          draft="$(gh release list --limit 50 --json tagName,isDraft \
+            --jq 'map(select(.isDraft)) | first | .tagName // ""')"
+
+          if [[ "${draft}" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; then
+            base="${draft}"
+            echo "the draft release says the next version is ${base}"
+          else
+            last="$(gh release list --limit 50 --json tagName,isDraft,isPrerelease \
+              --jq 'map(select(.isDraft == false and .isPrerelease == false))
+                    | first | .tagName // ""')"
+            echo "no usable draft (${draft:-none}); bumping the last stable release (${last:-none})"
+            base="$(bump "${last}")"
+          fi
+
+          # A draft can be left behind: release-drafter only recomputes it when
+          # something merges, and a version released by hand in between leaves
+          # it naming a version that is already out. A candidate of a released
+          # version would sort before the release it is supposedly ahead of, so
+          # the base moves past anything already tagged.
+          while git rev-parse -q --verify "refs/tags/${base}" >/dev/null; do
+            echo "${base} is already tagged; the draft is behind"
+            base="$(bump "${base}")"
+          done
+
+          echo "base=${base}" >>"${GITHUB_OUTPUT}"
+
+      # rc1 for the first candidate of a version, and one past the highest
+      # existing one after that. Counted from the tags rather than from a stored
+      # number: the tags are the record, and a run that failed after tagging
+      # must not hand the same number out twice.
+      - id: tag
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -euo pipefail
+
+          highest=0
+          while read -r existing; do
+            [[ -n "${existing}" ]] || continue
+            n="${existing##*rc}"
+            [[ "${n}" =~ ^[0-9]+$ ]] || continue
+            if (( n > highest )); then
+              highest="${n}"
+            fi
+          done < <(git tag --list "${BASE}rc*")
+
+          previous=""
+          if (( highest > 0 )); then
+            previous="${BASE}rc${highest}"
+          fi
+          {
+            echo "tag=${BASE}rc$(( highest + 1 ))"
+            echo "previous=${previous}"
+          } >>"${GITHUB_OUTPUT}"
+
+      # The same gate a stable release passes, run before the tag exists rather
+      # than after: a tag PyPI would reject is one that cannot be taken back.
+      - env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: ./scripts/check-versions.sh "${TAG}"
+
+      # Notes since the previous candidate, or since the last stable release
+      # when this is the first one, so a candidate says what it added rather
+      # than repeating everything in the version so far.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PREVIOUS: ${{ steps.tag.outputs.previous }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "${TAG} is already released; nothing to do"
+            exit 0
+          fi
+
+          notes=(--generate-notes)
+          if [[ -n "${PREVIOUS}" ]]; then
+            notes+=(--notes-start-tag "${PREVIOUS}")
+          fi
+
+          # --prerelease keeps it off the repository's "Latest" badge, out of
+          # release-drafter's version resolution (which excludes pre-releases),
+          # and out of a plain `pip install`: PyPI serves it only to --pre.
+          gh release create "${TAG}" \
+            --target "${SHA}" \
+            --title "${TAG}" \
+            --prerelease \
+            "${notes[@]}"
+
+          echo "published ${TAG} (pre-release); release.yml builds and uploads it"
