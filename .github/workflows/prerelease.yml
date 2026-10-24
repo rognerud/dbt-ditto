@@ -23,12 +23,17 @@ on:
   # workflow_run is dangerous when a workflow runs with the base repository's
   # write permissions and then checks out and executes code from the run that
   # triggered it, because that run may have been a pull request from a fork.
-  # The guard on the job below is what makes this one safe: it proceeds only
-  # for `event == 'push'` on `head_branch == 'main'`, and only this repository
-  # can push to its own main, which is protected and takes pull requests only.
-  # A fork's pull request triggers draft-release.yml through
-  # pull_request_target, which that condition excludes — even when the fork's
-  # branch happens to be called main.
+  # Two things keep this one out of that shape, and the second is the one that
+  # matters:
+  #
+  #   - the job proceeds only for `event == 'push'` on `head_branch == 'main'`,
+  #     and only this repository can push to its own main, which is protected
+  #     and takes pull requests only. A fork's pull request triggers
+  #     draft-release.yml through pull_request_target, which that condition
+  #     excludes — even when the fork's branch happens to be called main;
+  #   - nothing untrusted is checked out regardless. The checkout takes the
+  #     default branch, so the scripts this job runs are reviewed code whatever
+  #     the trigger turns out to have been.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["draft release"]
     types: [completed]
@@ -57,16 +62,47 @@ jobs:
       # Creating the release, which is what creates the tag.
       contents: write
     steps:
+      # No `ref:`. This job holds `contents: write` and runs scripts/ out of the
+      # checkout, so what it checks out has to be code that has been through
+      # review: the default branch, which is what a workflow_run event points
+      # GITHUB_SHA at. Checking out the triggering run's head_sha instead would
+      # be the privileged-checkout pattern CodeQL objects to — safe here only
+      # because of the `if:` above, and one relaxed condition away from
+      # executing a fork's code with a token that can tag and publish.
+      #
+      # The triggering commit is still what gets tagged; it is passed to
+      # `gh release create --target` as data, never executed, and the step below
+      # refuses it unless it is an ancestor of main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whole history and every tag: the candidate number is one more
-          # than the highest candidate already tagged for this version.
+          # than the highest candidate already tagged for this version, and the
+          # ancestry check needs the commits to compare.
           fetch-depth: 0
-          # The commit that triggered the drafter run, so the tag names the
-          # merge it is a candidate of rather than whatever main points at by
-          # the time this runs.
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+
+      # The commit the candidate is cut from, proven to be on main. For a push
+      # to main these are the same commit; this is what makes that an assertion
+      # rather than an assumption.
+      - id: target
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::${SHA} is not a commit id" >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+            echo "::error::${SHA} is not in this repository" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${SHA}" HEAD; then
+            echo "::error::${SHA} is not an ancestor of the default branch" >&2
+            exit 1
+          fi
+          echo "sha=${SHA}" >>"${GITHUB_OUTPUT}"
 
       # The next stable version, as the draft states it. Falling back to a patch
       # bump of the last stable release means a missing or malformed draft
@@ -164,7 +200,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
           PREVIOUS: ${{ steps.tag.outputs.previous }}
-          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
 
