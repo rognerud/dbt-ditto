@@ -114,7 +114,7 @@ jobs:
       # ref the maintainers repoint, and this is the one step in the repository
       # holding `id-token: write` — an upstream compromise there would be a
       # token that can publish to PyPI as this project.
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   # The release already exists — publishing its draft is what got us here — so
   # the archives are attached to it rather than a new one being created.
